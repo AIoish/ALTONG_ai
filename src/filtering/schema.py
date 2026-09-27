@@ -24,6 +24,10 @@ class RawNotification(BaseModel):
     body: str = Field(validation_alias=AliasChoices("body", "Body"))
     timestamp: datetime = Field(validation_alias=AliasChoices("timestamp", "Timestamp"))
 
+    @field_validator("sender", mode="before")
+    @classmethod
+    def normalize_null_sender(cls, value: object) -> object:
+        return "" if value is None else value
     _validate_timestamp = field_validator("timestamp", mode="before")(
         validate_utc_z_datetime
     )

@@ -16,3 +16,9 @@ outputs/
 *.safetensors
 
 AI_CONTEXT.md
+
+# Local dataset review notes
+/docs/filtering-synthetic-data-review.md
+
+# Local datasets; already tracked sample_notifications.jsonl remains tracked
+/filtering_training/data/*
