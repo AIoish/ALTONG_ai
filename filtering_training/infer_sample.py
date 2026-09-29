@@ -10,7 +10,7 @@ from src.filtering.schema import FilteringSample
 
 
 DEFAULT_DATASET = Path(__file__).resolve().parent / "data" / "sample_notifications.jsonl"
-DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
+DEFAULT_MODEL = "Qwen/Qwen3-1.7B"
 
 
 def main() -> None:
