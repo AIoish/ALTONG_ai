@@ -16,7 +16,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "prepared_rapid"
 
 
 def prepare(dataset: Path = OUTPUT_PATH, output_dir: Path = OUTPUT_DIR,
-            seed: int = 42) -> dict:
+            seed: int = 42, preserve_manifest: Path | None = None) -> dict:
     samples = load_samples(dataset)
     lineage_path = dataset.with_suffix(".lineage.json")
     lineage = json.loads(lineage_path.read_text(encoding="utf-8"))
@@ -43,8 +43,27 @@ def prepare(dataset: Path = OUTPUT_PATH, output_dir: Path = OUTPUT_DIR,
         raise ValueError("dataset categories are incomplete")
 
     assignments = {}
+    previous_ids = {}
+    if preserve_manifest is not None:
+        previous = json.loads(preserve_manifest.read_text(encoding="utf-8"))
+        for name, info in previous["splits"].items():
+            if name not in {"train", "validation", "test"}:
+                raise ValueError("invalid previous split")
+            for family in info["families"]:
+                if family in assignments:
+                    raise ValueError("previous family crosses splits")
+                assignments[family] = name
+            for identifier in info["notification_ids"]:
+                if identifier in previous_ids:
+                    raise ValueError("previous ID crosses splits")
+                previous_ids[identifier] = name
+        if not set(assignments).issubset(grouped):
+            raise ValueError("previous families are missing from dataset")
+        for identifier, name in previous_ids.items():
+            if identifier not in family_by_id or assignments[family_by_id[identifier]] != name:
+                raise ValueError("previous sample assignment changed")
     for category in CATEGORIES:
-        families = sorted(category_families[category])
+        families = sorted(category_families[category] - assignments.keys())
         if len(families) < 3:
             raise ValueError(f"at least three families required for {category}")
         random.Random(f"{seed}:{category}").shuffle(families)
@@ -61,7 +80,8 @@ def prepare(dataset: Path = OUTPUT_PATH, output_dir: Path = OUTPUT_DIR,
         "lineage_sha256": hashlib.sha256(lineage_path.read_bytes()).hexdigest(),
         "seed": seed,
         "status": "provisional; review wording and labels before model training",
-        "split_rule": "one scenario family per category for validation and test; remaining families for training",
+        "split_rule": "preserve previous assignments; hold out one new family/category for validation and test" if preserve_manifest else "one scenario family per category for validation and test; remaining families for training",
+        "preserved_manifest_sha256": hashlib.sha256(preserve_manifest.read_bytes()).hexdigest() if preserve_manifest else None,
         "splits": {},
     }
     for name, items in splits.items():
@@ -71,6 +91,7 @@ def prepare(dataset: Path = OUTPUT_PATH, output_dir: Path = OUTPUT_DIR,
                 destination.write(json.dumps(to_sft_record(sample), ensure_ascii=False) + "\n")
         manifest["splits"][name] = {
             "count": len(items),
+            "notification_ids": [item.notification.id for item in items],
             "families": sorted({family_by_id[item.notification.id] for item in items}),
             "category_counts": {category: sum(item.label.category == category for item in items)
                                 for category in CATEGORIES},
@@ -86,8 +107,9 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path, default=OUTPUT_PATH)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--preserve-manifest", type=Path)
     args = parser.parse_args()
-    manifest = prepare(args.dataset, args.output_dir, args.seed)
+    manifest = prepare(args.dataset, args.output_dir, args.seed, args.preserve_manifest)
     print(json.dumps({name: info["count"] for name, info in manifest["splits"].items()}))
 
 

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from filtering_training.evaluate import load_split_samples
 from filtering_training.generate_rapid_dataset import generate
 from filtering_training.prepare_rapid_dataset import prepare
 
@@ -23,6 +24,7 @@ class PrepareRapidDatasetTests(unittest.TestCase):
             for name, split in manifest["splits"].items():
                 records = (root / "prepared" / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()
                 self.assertEqual(len(records), split["count"])
+                self.assertEqual(len(load_split_samples(dataset, root / "prepared", name)), split["count"])
                 self.assertEqual(len(json.loads(records[0])["messages"]), 3)
 
 
