@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from sklearn.metrics import f1_score
@@ -13,7 +14,7 @@ from src.filtering.prompt import SYSTEM_PROMPT, build_messages, parse_model_outp
 from src.filtering.schema import FilterLabel, FilteringSample
 
 
-MODEL_NAME = "Qwen/Qwen3-0.6B"
+MODEL_NAME = "Qwen/Qwen3-1.7B"
 EVALUATION_DIR = Path(__file__).resolve().parent / "outputs" / "evaluation"
 MAX_NEW_TOKENS = 192
 
@@ -91,7 +92,7 @@ def score_predictions(
 def evaluate(
     dataset: Path, prepared_dir: Path, split: str, model_name: str,
     adapter: Path | None, output: Path, example_count: int = 0,
-    examples_output: Path | None = None
+    examples_output: Path | None = None, load_in_4bit: bool = False
 ) -> dict:
     import torch
     import transformers
@@ -99,14 +100,29 @@ def evaluate(
 
     samples = load_split_samples(dataset, prepared_dir, split)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype="auto", device_map="auto"
-    )
+    load_kwargs = {"dtype": "auto", "device_map": "auto"}
+    if load_in_4bit:
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is required for this local 4-bit comparison")
+        from transformers import BitsAndBytesConfig
+        load_kwargs.update(
+            dtype=torch.float16,
+            device_map={"": 0},
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.float16,
+            ),
+        )
+    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
     if adapter is not None:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter)
     model.eval()
     predictions: list[FilterLabel | None] = []
+    responses = []
+    timings = []
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
     for sample in samples:
         inputs = tokenizer.apply_chat_template(
             build_messages(sample.notification, sample.context),
@@ -116,6 +132,9 @@ def evaluate(
             return_dict=True,
             return_tensors="pt",
         ).to(model.device)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        started = time.perf_counter()
         with torch.inference_mode():
             generated = model.generate(
                 **inputs,
@@ -123,17 +142,36 @@ def evaluate(
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        timings.append(time.perf_counter() - started)
         response = tokenizer.decode(
             generated[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True
         )
+        responses.append(response)
+        print(f"Evaluated {len(responses)}/{len(samples)}: {sample.notification.id}", flush=True)
         try:
             predictions.append(parse_model_output(response))
         except ValueError:
             predictions.append(None)
+    quantization_config = getattr(model.config, "quantization_config", None)
+    if hasattr(quantization_config, "to_dict"):
+        quantization_config = quantization_config.to_dict()
+    provenance_path = Path(model_name) / "download_provenance.json"
     report = {
         "model": model_name,
         "model_revision": getattr(model.config, "_commit_hash", None),
         "adapter": str(adapter) if adapter is not None else None,
+        "quantization": quantization_config,
+        "load_in_4bit_requested": load_in_4bit,
+        "checkpoint_provenance": json.loads(provenance_path.read_text(encoding="utf-8")) if provenance_path.is_file() else None,
+        "performance": {
+            "generation_seconds": timings,
+            "mean_generation_seconds": sum(timings) / len(timings),
+            "model_footprint_bytes": model.get_memory_footprint(),
+            "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated() if torch.cuda.is_available() else None,
+            "peak_cuda_reserved_bytes": torch.cuda.max_memory_reserved() if torch.cuda.is_available() else None,
+        },
         "dataset_sha256": hashlib.sha256(dataset.read_bytes()).hexdigest(),
         "prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
         "split": split,
@@ -151,8 +189,9 @@ def evaluate(
             {
                 "notification_id": sample.notification.id,
                 "model_output": prediction.model_dump() if prediction is not None else None,
+                "raw_response": response,
             }
-            for sample, prediction in zip(samples, predictions)
+            for sample, prediction, response in zip(samples, predictions, responses)
         ][:example_count]
         examples_json = json.dumps(
             {"prediction_examples": examples}, ensure_ascii=False, indent=2
@@ -173,6 +212,7 @@ def main() -> None:
     parser.add_argument("--split", choices=("train", "validation", "test"), default="test")
     parser.add_argument("--model", default=MODEL_NAME)
     parser.add_argument("--adapter", type=Path)
+    parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--examples-output", type=Path)
     parser.add_argument("--show-examples", type=int, default=3,
@@ -185,7 +225,7 @@ def main() -> None:
     )
     report = evaluate(args.dataset, args.prepared_dir, args.split,
                       args.model, args.adapter, output, args.show_examples,
-                      args.examples_output)
+                      args.examples_output, args.load_in_4bit)
     print(json.dumps(report["metrics"], ensure_ascii=False, indent=2))
     print(f"Report: {output}")
 

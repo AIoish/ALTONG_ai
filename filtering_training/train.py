@@ -1,4 +1,4 @@
-"""Run a small Qwen3-0.6B LoRA SFT smoke training job."""
+"""Run a Qwen3-1.7B LoRA SFT training experiment."""
 
 import argparse
 import hashlib
@@ -8,7 +8,7 @@ from pathlib import Path
 
 PREPARED_DIR = Path(__file__).resolve().parent / "outputs" / "prepared"
 RUN_DIR = Path(__file__).resolve().parent / "outputs" / "lora-smoke"
-MODEL_NAME = "Qwen/Qwen3-0.6B"
+MODEL_NAME = "Qwen/Qwen3-1.7B"
 
 
 def load_training_pairs(path: Path, tokenizer, max_length: int) -> list[dict[str, str]]:
@@ -37,7 +37,9 @@ def load_training_pairs(path: Path, tokenizer, max_length: int) -> list[dict[str
 
 
 def train(prepared_dir: Path, run_dir: Path, max_steps: int,
-          max_length: int, seed: int, model_name: str) -> dict:
+          max_length: int, seed: int, model_name: str, qlora: bool = False,
+          learning_rate: float = 2e-4, save_steps: int = 0, eval_steps: int = 0,
+          lora_targets: str = "q_proj,v_proj") -> dict:
     import torch
     import transformers
     import trl
@@ -48,14 +50,16 @@ def train(prepared_dir: Path, run_dir: Path, max_steps: int,
     from trl import SFTConfig, SFTTrainer
 
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is required for this local LoRA smoke run")
-    if max_steps < 1 or max_length < 1:
+        raise RuntimeError("CUDA is required for this local LoRA training run")
+    if max_steps < 1 or max_length < 1 or learning_rate <= 0 or save_steps < 0 or eval_steps < 0:
         raise ValueError("max_steps and max_length must be positive")
     set_seed(seed)
     use_bf16 = torch.cuda.is_bf16_supported()
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     pairs = load_training_pairs(prepared_dir / "train.jsonl", tokenizer, max_length)
+    validation_pairs = load_training_pairs(prepared_dir / "validation.jsonl", tokenizer, max_length) if eval_steps else None
     manifest = json.loads((prepared_dir / "manifest.json").read_text(encoding="utf-8"))
+    targets = "all-linear" if lora_targets == "all-linear" else lora_targets.split(",")
     run_dir.mkdir(parents=True, exist_ok=True)
     run_config = {
         "model": model_name,
@@ -68,18 +72,37 @@ def train(prepared_dir: Path, run_dir: Path, max_steps: int,
         "max_length": max_length,
         "seed": seed,
         "lora": {"r": 8, "alpha": 16, "dropout": 0.05,
-                 "target_modules": ["q_proj", "v_proj"]},
+                 "target_modules": targets},
         "versions": {"torch": torch.__version__, "transformers": transformers.__version__,
                      "trl": trl.__version__, "peft": peft.__version__},
         "device": torch.cuda.get_device_name(0),
         "precision": "bf16" if use_bf16 else "fp16",
-        "purpose": "pipeline smoke test, not model quality evidence",
+        "method": "QLoRA" if qlora else "LoRA",
+        "learning_rate": learning_rate,
+        "save_steps": save_steps, "eval_steps": eval_steps,
+        "validation_count": len(validation_pairs) if validation_pairs else 0,
+        "purpose": "local LoRA SFT experiment; quality requires separate evaluation",
     }
     (run_dir / "run_config.json").write_text(
         json.dumps(run_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
-    model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.bfloat16 if use_bf16 else torch.float16)
+    model_kwargs = {"dtype": torch.bfloat16 if use_bf16 else torch.float16}
+    if qlora:
+        from transformers import BitsAndBytesConfig
+        from peft import prepare_model_for_kbit_training
+        model_kwargs.update(device_map={"": 0}, quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16 if use_bf16 else torch.float16,
+        ))
+    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+    if qlora:
+        model = prepare_model_for_kbit_training(model)
+    run_config["quantization"] = getattr(model.config, "quantization_config", None)
+    if hasattr(run_config["quantization"], "to_dict"):
+        run_config["quantization"] = run_config["quantization"].to_dict()
+    provenance_path = Path(model_name) / "download_provenance.json"
+    run_config["checkpoint_provenance"] = json.loads(provenance_path.read_text(encoding="utf-8")) if provenance_path.is_file() else None
     model.config.use_cache = False
     args = SFTConfig(
         output_dir=str(run_dir / "trainer"),
@@ -87,13 +110,17 @@ def train(prepared_dir: Path, run_dir: Path, max_steps: int,
         max_length=max_length,
         per_device_train_batch_size=1,
         gradient_accumulation_steps=1,
-        learning_rate=2e-4,
+        learning_rate=learning_rate,
         optim="adamw_torch",
         fp16=not use_bf16,
         bf16=use_bf16,
         gradient_checkpointing=True,
-        save_strategy="no",
-        eval_strategy="no",
+        save_strategy="steps" if save_steps else "no",
+        save_steps=save_steps or 500,
+        save_total_limit=2,
+        eval_strategy="steps" if eval_steps else "no",
+        eval_steps=eval_steps or 500,
+        per_device_eval_batch_size=1,
         logging_steps=1,
         report_to="none",
         disable_tqdm=True,
@@ -105,12 +132,13 @@ def train(prepared_dir: Path, run_dir: Path, max_steps: int,
     )
     lora = LoraConfig(
         r=8, lora_alpha=16, lora_dropout=0.05, bias="none",
-        task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"],
+        task_type="CAUSAL_LM", target_modules=targets,
     )
     trainer = SFTTrainer(
         model=model,
         args=args,
         train_dataset=Dataset.from_list(pairs),
+        eval_dataset=Dataset.from_list(validation_pairs) if validation_pairs else None,
         processing_class=tokenizer,
         peft_config=lora,
     )
@@ -120,11 +148,19 @@ def train(prepared_dir: Path, run_dir: Path, max_steps: int,
             or not any(value == -100 for value in labels)
             or not any(value != -100 for value in labels)):
         raise RuntimeError("training data does not mask the prompt from loss")
+    run_config["trainable_parameters"] = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
+    if qlora and any(p.requires_grad and "lora_" not in name for name, p in trainer.model.named_parameters()):
+        raise RuntimeError("QLoRA must only train adapter parameters")
+    torch.cuda.reset_peak_memory_stats()
     result = trainer.train()
+    run_config["peak_cuda_allocated_bytes"] = torch.cuda.max_memory_allocated()
+    run_config["peak_cuda_reserved_bytes"] = torch.cuda.max_memory_reserved()
+    run_config["log_history"] = trainer.state.log_history
     adapter_dir = run_dir / "adapter"
     trainer.model.save_pretrained(adapter_dir)
     tokenizer.save_pretrained(adapter_dir)
     run_config["training_loss"] = result.training_loss
+    run_config["training_metrics"] = result.metrics
     run_config["adapter_dir"] = str(adapter_dir)
     (run_dir / "run_config.json").write_text(
         json.dumps(run_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -140,9 +176,15 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=2)
     parser.add_argument("--max-length", type=int, default=768)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--qlora", action="store_true")
+    parser.add_argument("--learning-rate", type=float, default=2e-4)
+    parser.add_argument("--save-steps", type=int, default=0)
+    parser.add_argument("--eval-steps", type=int, default=0)
+    parser.add_argument("--lora-targets", default="q_proj,v_proj")
     args = parser.parse_args()
     config = train(args.prepared_dir, args.run_dir, args.max_steps,
-                   args.max_length, args.seed, args.model)
+                   args.max_length, args.seed, args.model, args.qlora,
+                   args.learning_rate, args.save_steps, args.eval_steps, args.lora_targets)
     print(json.dumps({"training_loss": config["training_loss"],
                       "adapter_dir": config["adapter_dir"]}, ensure_ascii=False))
 
