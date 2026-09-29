@@ -55,10 +55,20 @@ def _max_summary_lines(case: Mapping[str, Any]) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
+    parser.add_argument(
+        "--adapter-path",
+        type=Path,
+        help="local path to a trained PEFT/LoRA adapter",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="optional path for the JSON evaluation report",
+    )
     args = parser.parse_args()
 
     cases = load_cases(args.cases)
-    tokenizer, model = load_model()
+    tokenizer, model = load_model(adapter_path=args.adapter_path)
     structured_count = 0
     fact_hits = 0
     fact_total = 0
@@ -133,6 +143,9 @@ def main() -> None:
 
     report = {
         "model": MODEL_NAME,
+        "adapter_path": str(args.adapter_path)
+        if args.adapter_path is not None
+        else None,
         "case_count": len(cases),
         "structured_output_rate": round(structured_count / len(cases), 4),
         "case_pass_rate": round(passed_case_count / len(cases), 4),
@@ -142,7 +155,11 @@ def main() -> None:
         "average_latency_seconds": round(sum(latencies) / len(latencies), 2),
         "results": results,
     }
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    serialized_report = json.dumps(report, ensure_ascii=False, indent=2)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(serialized_report + "\n", encoding="utf-8")
+    print(serialized_report)
 
 
 if __name__ == "__main__":

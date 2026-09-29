@@ -37,7 +37,18 @@ def load_cases(path: str | Path = DEFAULT_CASES_PATH) -> list[dict[str, Any]]:
     return cases
 
 
-def load_model(model_name: str = MODEL_NAME):
+def attach_adapter(model: Any, adapter_path: str | Path):
+    """Attach a trained PEFT adapter to an already loaded base model."""
+    from peft import PeftModel
+
+    return PeftModel.from_pretrained(model, str(adapter_path))
+
+
+def load_model(
+    model_name: str = MODEL_NAME,
+    *,
+    adapter_path: str | Path | None = None,
+):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -49,6 +60,8 @@ def load_model(model_name: str = MODEL_NAME):
         device_map="auto",
         low_cpu_mem_usage=True,
     )
+    if adapter_path is not None:
+        model = attach_adapter(model, adapter_path)
     model.eval()
     return tokenizer, model
 
@@ -97,6 +110,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--case-index", type=int, default=0)
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
+    parser.add_argument(
+        "--adapter-path",
+        type=Path,
+        help="local path to a trained PEFT/LoRA adapter",
+    )
     args = parser.parse_args()
 
     cases = load_cases(args.cases)
@@ -117,8 +135,10 @@ def main() -> None:
 
     print(f"Model: {MODEL_NAME}")
     print(f"Case: {case.get('case_id', args.case_index)}")
+    if args.adapter_path is not None:
+        print(f"Adapter: {args.adapter_path}")
     print("Loading tokenizer and model...")
-    tokenizer, model = load_model()
+    tokenizer, model = load_model(adapter_path=args.adapter_path)
     raw_response, elapsed_seconds = generate_summary(
         tokenizer=tokenizer,
         model=model,
