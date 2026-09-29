@@ -35,7 +35,7 @@ Generated checkpoints, adapters, and experiment outputs belong under
 python -m filtering_training.infer_sample --sample-index 0
 ```
 
-This runs `Qwen/Qwen3-0.6B` with thinking disabled, validates the four-field
+This runs `Qwen/Qwen3-1.7B` with thinking disabled, validates the four-field
 label JSON, and applies the existing policy. The base model has not been
 fine-tuned, so this command checks the input/output path rather than accuracy.
 
@@ -84,12 +84,14 @@ python -m filtering_training.audit_dataset
 This writes aggregate label and context coverage to
 `filtering_training/outputs/audit/dataset_audit.json`. Review the aggregate findings before expanding the dataset.
 
-## Provisional independent holdout
+## Provisional development evaluation set
 
 The 24 hand-written synthetic cases in
 `filtering_training/data/evaluation_notifications.jsonl` are separate from the
 51 training-pipeline samples. Their labels still need independent review, so this
-is a provisional evaluation set rather than a final quality benchmark.
+is a development evaluation set rather than a final quality benchmark.
+These 24 cases were used repeatedly for model and data choices. Use a new untouched,
+independently reviewed local set for final reporting.
 This 24-case file is local and Git-ignored: supply it locally to run holdout
 evaluation. Repository tests create temporary synthetic fixtures instead.
 
@@ -129,7 +131,7 @@ calendar, system, personal, and promotional notifications.
 
 These labels and the generated `ai_summary_reason` text are provisional. Review
 them before moving any candidates into the versioned training dataset or running
-a full training job. Keep the independent 24-case holdout out of training.
+a full training job. Keep the separate 24-case development evaluation set out of training.
 
 ## External notification source and processing
 
@@ -164,7 +166,7 @@ Git-ignored pilot provenance file. The added cases cover all eight categories,
 including neutral status notices labeled `기타`, and recent-process lengths 0-3.
 A few fictional role labels exercise `sender`; no personal names are used.
 These pilot labels remain provisional and the pilot is not used for model
-training or the independent holdout. The low count of relevance score 2 and
+training or the separate development evaluation set. The low count of relevance score 2 and
 the concentration of `기타` in repository notices remain coverage gaps.
 
 ## Fast external-source translation draft
@@ -215,5 +217,104 @@ and one for test; current counts are 2,398 train, 302 validation, 300 test.
 The prepared SFT files and manifest are Git-ignored. They are **provisional**:
 automatic schema and overlap checks do not establish natural Korean wording,
 correct labels, or generalization to real notifications. Review representative
-cases and add independently written cases before full training. Keep the separate
+cases and add independently written cases before treating results as release evidence. Keep the separate
 24-case human-authored holdout out of this candidate set and its training split.
+## Current model choice (2026-09-28)
+
+The default training, evaluation, and sample inference model is now
+`Qwen/Qwen3-1.7B`. The 500-step local comparison favored it over 0.6B, and BF16
+LoRA training succeeded on the RTX 3060 Laptop GPU. The 500-step adapter still
+blocked five of nine urgent development cases, so it is not a release model.
+The earlier 0.6B experiments remain in the experiment log. On 2026-09-29, a fresh
+1.7B LoRA run completed one pass over all 2,398 training rows in about 1,007 seconds.
+On the same 24 development cases, policy accuracy fell from 19/24 to 17/24 and
+urgent false blocks increased from 5/9 to 6/9. The full-pass adapter is not adopted
+as the new baseline; the 500-step adapter remains a development comparison only.
+Both adapters and all generated datasets stay local and Git-ignored.
+
+Next: add 2,000 rows, 250 per category, with new scenario families and balanced
+IT work, personal, promotional, and neutral cases. Prioritize realistic short
+messages, deadlines, impact, and context relevance without copying development
+evaluation sentences. Recheck labels and family overlap, then retrain and measure
+on an untouched final evaluation set. The repeated 24-case set is for development.
+
+## Targeted extension (2026-09-29): 5,000 local rows
+
+```powershell
+python -m filtering_training.generate_targeted_dataset
+python -m filtering_training.prepare_rapid_dataset --dataset filtering_training/outputs/candidates/combined_korean_5000.jsonl --output-dir filtering_training/outputs/prepared_targeted_5000 --preserve-manifest filtering_training/outputs/prepared_rapid/manifest.json
+```
+
+The added 2,000 rows contain 1,000 new title/body pairs with two contrasting
+contexts each. Forty new scenario families cover operational failures, routine
+IT work, imminent schedules, device/security states, personal deadlines, casual
+messages, advertising, and neutral notices. All eight categories add 250 rows.
+Urgency and category stay constant within context pairs; relevance changes.
+Optional marketing deadlines and benign uses of 'now' are included as negatives.
+Labels explain impact/deadline evidence and context relevance; they are provisional.
+No raw private sample or development-evaluation text is used as source wording.
+
+The combined dataset has 5,000 rows, 4,000 distinct title/body pairs, 120 families,
+and 625 rows/category. Original validation/test assignments are preserved. New
+context pairs remain in the same family and split. Prepared counts are 3,598
+train, 702 validation, and 700 test; not all 5,000 rows are used for training.
+Dataset, lineage, audit, and SFT files stay under ignored `outputs/`. Automatic
+checks establish schema/overlap consistency, not independent label correctness
+or model improvement. Retraining and unused evaluation data are still required.
+
+## 4-bit base-model comparison
+
+The default remains Qwen3-1.7B. A larger candidate can be evaluated without training:
+
+```powershell
+python -m filtering_training.evaluate --dataset filtering_training/data/evaluation_notifications.jsonl --prepared-dir filtering_training/outputs/holdout --split test --model Qwen/Qwen3-4B-Instruct-2507 --load-in-4bit --output filtering_training/outputs/evaluation/qwen3_4b_instruct_nf4_dev24.json --examples-output filtering_training/outputs/evaluation/qwen3_4b_instruct_nf4_predictions24.json --show-examples 24
+```
+
+For an original checkpoint, this requests bitsandbytes NF4 with double quantization and FP16 computation. A prequantized checkpoint uses its stored quantization configuration; the report records the actual settings. It loads
+entirely on CUDA device 0; it does not silently offload to CPU. Initial download
+uses the original checkpoint size, not the quantized in-memory size. The report
+records quantization, raw responses, per-case generation time, model footprint,
+and peak CUDA allocated/reserved memory. Timings exclude loading, tokenization,
+and parsing and include the first generation; they are not end-to-end latency.
+CUDA allocation statistics exclude some driver/library memory, so they are not
+identical to `nvidia-smi`. Evaluation results remain local under ignored outputs.
+The repeated 24 cases are development data, not a blind final test. Compare base
+models separately from trained adapters and record precision differences.
+
+The 2026-09-30 local run used the checksum-verified Unsloth prequantized distribution
+of Qwen3-4B-Instruct-2507 (NF4, double quantization, BF16 computation), after the
+original download stalled. Local model path:
+`filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit`.
+Evaluate that path with the same command's `--model` argument. No Unsloth runtime
+or new training was used. On the repeated development 24, policy accuracy was
+17/24, urgent false blocks 1/9, and unnecessary passes 6/14. Mean generation time
+was 6.53 seconds/case, and observed GPU memory was about 2,923 MiB. These are
+local development results and do not establish final quality or QLoRA training fit.
+The default remains Qwen3-1.7B pending a trained-candidate comparison.
+
+## QLoRA training on the local 4B checkpoint
+
+```powershell
+python -m filtering_training.train --prepared-dir filtering_training/outputs/prepared_targeted_5000 --run-dir filtering_training/outputs/qlora-qwen3-4b-smoke-20260930 --model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit --qlora --max-steps 2 --learning-rate 0.0001 --lora-targets all-linear
+```
+
+Use a fresh run directory for each experiment. `--qlora` loads the base entirely
+on CUDA 0, prepares k-bit training, and trains adapters only. The 2-step reload
+probe succeeded on the local 6GB GPU; this is pipeline evidence, not quality
+or worst-case memory evidence. `--save-steps 250 --eval-steps 250` enables
+checkpoint saving and teacher-forced validation loss on the prepared validation
+split. Validation loss is not policy accuracy. The run configuration records
+actual quantization, data/model provenance, trainable parameter count, training
+metrics, validation history, and peak CUDA allocation. Default model remains
+1.7B, ordinary LoRA remains available, and generated data/adapters stay local.
+
+The 2026-09-30 QLoRA experiment completed 500 steps over the expanded 3,598-row
+training split, with all-linear rank-8 adapters and learning rate 0.0001. Full
+702-row validation loss improved from 0.2815 at step 250 to 0.2525 at step 500.
+Training plus both validations took about 1,270 seconds and peak CUDA reserved
+memory was 4.95 GiB. On the repeated development 24, policy decisions were 24/24,
+urgent false blocks 0/9, and unnecessary passes 0/14. Category accuracy was 18/24,
+so this is not perfect prediction of all output fields. Mean generation time was
+7.89 seconds/case. The adapter is a promising development candidate, pending
+untouched evaluation, label review, and latency work. No default model switch,
+training beyond 500 steps, commit, or push was performed.
