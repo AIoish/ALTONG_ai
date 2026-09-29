@@ -43,3 +43,57 @@ model-quality benchmark.
 
 Generated checkpoints, adapters, and experiment outputs must remain under an
 ignored `outputs` directory. Never add real notifications or personal data.
+
+## Prepare synthetic fine-tuning data
+
+Generate deterministic training and validation records from synthetic scenario
+templates:
+
+```powershell
+python -m briefing_training.prepare_dataset
+```
+
+The default command writes 200 training cases to `data/train_cases.jsonl` and
+40 validation cases to `data/validation_cases.jsonl`. The fixed eight-case
+`evaluation_cases.jsonl` file remains separate and must not be used for
+fine-tuning. Validation cases use held-out entities and November dates, while
+training cases use October dates. All eight official filter categories are
+represented, and no real notifications or personal data are included.
+
+Validate the generated fine-tuning records without loading a model:
+
+```powershell
+python -m briefing_training.train_lora --validate-only
+```
+
+## Train a QLoRA adapter in Colab
+
+Open `colab_train_qwen_lora.ipynb` in Google Colab, select a GPU runtime, and
+run the cells in order. The notebook installs the dependencies from
+`requirements-lora.txt`, validates the synthetic data, and saves the adapter
+under `MyDrive/ALTONG_models/briefing-qwen-lora`.
+
+The notebook removes Colab's preinstalled `torchao` before installing the
+training dependencies. This project uses bitsandbytes NF4 rather than torchao,
+and an older preinstalled torchao release can prevent current PEFT versions
+from loading the saved adapter.
+
+The training command uses 4-bit NF4 quantization and trains only LoRA adapter
+parameters. The base model remains unchanged. Training outputs must stay in
+Google Drive or the ignored local `outputs` directory and must not be committed
+to Git.
+
+## Evaluate a trained adapter
+
+Run the same fixed evaluation set with the saved adapter and optionally write
+the JSON report to a file:
+
+```powershell
+python -m briefing_training.evaluate `
+  --adapter-path /content/drive/MyDrive/ALTONG_models/briefing-qwen-lora `
+  --output /content/drive/MyDrive/ALTONG_models/briefing-qwen-lora/evaluation.json
+```
+
+The adapter evaluation must use `data/evaluation_cases.jsonl`, which is kept
+separate from the training and validation data. Compare its structured output
+rate, case pass rate, fact coverage, and latency with the base-model report.

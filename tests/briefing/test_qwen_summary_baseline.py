@@ -1,4 +1,7 @@
+import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from briefing_training.evaluate import (
     _expected_facts,
@@ -10,6 +13,7 @@ from briefing_training.prompts import (
     build_messages,
     parse_summary_response,
 )
+from briefing_training.smoke_test_model import attach_adapter
 
 
 SYNTHETIC_GROUP = {
@@ -30,6 +34,25 @@ SYNTHETIC_GROUP = {
 
 
 class QwenSummaryBaselineTests(unittest.TestCase):
+    def test_adapter_is_loaded_from_the_requested_path(self) -> None:
+        base_model = object()
+        adapted_model = object()
+
+        class FakePeftModel:
+            @staticmethod
+            def from_pretrained(model, adapter_path):
+                self.assertIs(model, base_model)
+                self.assertEqual(adapter_path, "saved-adapter")
+                return adapted_model
+
+        with patch.dict(
+            sys.modules,
+            {"peft": SimpleNamespace(PeftModel=FakePeftModel)},
+        ):
+            actual = attach_adapter(base_model, "saved-adapter")
+
+        self.assertIs(actual, adapted_model)
+
     def test_prompt_contains_group_context_and_output_contract(self) -> None:
         messages = build_messages(SYNTHETIC_GROUP, max_summary_lines=1)
         actual_prompt = messages[-1]["content"]
