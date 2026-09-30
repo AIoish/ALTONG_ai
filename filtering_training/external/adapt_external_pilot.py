@@ -9,15 +9,17 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from filtering_training.prepare_dataset import DATASET_PATH, load_samples
-from filtering_training.prepare_holdout import HOLDOUT_PATH, notification_key
+from filtering_training import TRAINING_ROOT
+
+from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
+from filtering_training.datasets.prepare_holdout import HOLDOUT_PATH, notification_key
 from src.filtering.prompt import parse_model_output
 from src.filtering.schema import FilteringSample
 
-from filtering_training.select_external_candidates import OUTPUT_PATH as SOURCE_POOL
+from filtering_training.external.select_external_candidates import OUTPUT_PATH as SOURCE_POOL
 
 
-OUTPUT_PATH = Path(__file__).resolve().parent / "outputs" / "candidates" / "external_adapted_pilot.jsonl"
+OUTPUT_PATH = TRAINING_ROOT / "outputs" / "candidates" / "external_adapted_pilot.jsonl"
 CONTEXTS = {
     "code": ("Code.exe", "auth_service.py - 가상 프로젝트 - Visual Studio Code", ["Code.exe", "chrome.exe"], 45),
     "cdn": ("Code.exe", "cdn_config.yml - 가상 프로젝트 - Visual Studio Code", ["Code.exe", "WindowsTerminal.exe"], 65),

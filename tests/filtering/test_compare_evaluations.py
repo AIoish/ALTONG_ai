@@ -6,7 +6,7 @@ from pathlib import Path
 
 from filtering_training.compare_evaluations import compare
 from filtering_training.evaluate import score_predictions
-from filtering_training.prepare_dataset import load_samples
+from filtering_training.datasets.prepare_dataset import load_samples
 
 
 class CompareEvaluationsTests(unittest.TestCase):

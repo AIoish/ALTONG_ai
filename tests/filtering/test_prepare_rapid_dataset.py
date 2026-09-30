@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from filtering_training.evaluate import load_split_samples
-from filtering_training.generate_rapid_dataset import generate
-from filtering_training.prepare_rapid_dataset import prepare
+from filtering_training.generation.generate_rapid_dataset import generate
+from filtering_training.datasets.prepare_rapid_dataset import prepare
 
 
 class PrepareRapidDatasetTests(unittest.TestCase):

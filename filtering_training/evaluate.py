@@ -6,16 +6,18 @@ import json
 import time
 from pathlib import Path
 
+from filtering_training import TRAINING_ROOT
+
 from sklearn.metrics import f1_score
 
-from filtering_training.prepare_dataset import DATASET_PATH, OUTPUT_DIR, load_samples
+from filtering_training.datasets.prepare_dataset import DATASET_PATH, OUTPUT_DIR, load_samples
 from src.filtering.policy import should_pass
 from src.filtering.prompt import SYSTEM_PROMPT, build_messages, parse_model_output
 from src.filtering.schema import FilterLabel, FilteringSample
 
 
 MODEL_NAME = "Qwen/Qwen3-1.7B"
-EVALUATION_DIR = Path(__file__).resolve().parent / "outputs" / "evaluation"
+EVALUATION_DIR = TRAINING_ROOT / "outputs" / "evaluation"
 MAX_NEW_TOKENS = 192
 
 

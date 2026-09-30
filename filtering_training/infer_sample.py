@@ -5,12 +5,14 @@ import json
 import sys
 from pathlib import Path
 
+from filtering_training import TRAINING_ROOT
+
 from src.filtering.policy import should_pass
 from src.filtering.prompt import build_messages, parse_model_output
 from src.filtering.schema import CurrentContext, FilteringSample, RawNotification
 
 
-DEFAULT_DATASET = Path(__file__).resolve().parent / "data" / "sample_notifications.jsonl"
+DEFAULT_DATASET = TRAINING_ROOT / "data" / "sample_notifications.jsonl"
 DEFAULT_MODEL = "Qwen/Qwen3-1.7B"
 
 

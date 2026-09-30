@@ -5,9 +5,11 @@ import hashlib
 import json
 from pathlib import Path
 
+from filtering_training import TRAINING_ROOT
 
-PREPARED_DIR = Path(__file__).resolve().parent / "outputs" / "prepared"
-RUN_DIR = Path(__file__).resolve().parent / "outputs" / "lora-smoke"
+
+PREPARED_DIR = TRAINING_ROOT / "outputs" / "prepared"
+RUN_DIR = TRAINING_ROOT / "outputs" / "lora-smoke"
 MODEL_NAME = "Qwen/Qwen3-1.7B"
 
 

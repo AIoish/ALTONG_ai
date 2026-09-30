@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from filtering_training.audit_external_translations import audit
+from filtering_training.external.audit_external_translations import audit
 
 
 class ExternalTranslationAuditTests(unittest.TestCase):

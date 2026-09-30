@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 from filtering_training.evaluate import score_predictions
-from filtering_training.prepare_dataset import load_samples
+from filtering_training.datasets.prepare_dataset import load_samples
 from src.filtering.policy import should_pass
 from src.filtering.prompt import CATEGORIES, parse_model_output
 

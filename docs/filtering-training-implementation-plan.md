@@ -32,7 +32,7 @@ JSON을 출력하도록 LoRA SFT 파이프라인을 만든다. 최종 `is_passed
 
 ### 1. 학습 데이터 준비기
 
-- `filtering_training/prepare_dataset.py`를 추가한다.
+- `filtering_training/datasets/prepare_dataset.py`를 추가한다.
 - JSONL을 `FilteringSample`로 검증하고 중복 ID, 누락·빈 라벨,
   허용되지 않은 카테고리를 확인한다.
 - `src/filtering/prompt.py`의 `build_messages`를 그대로 사용해

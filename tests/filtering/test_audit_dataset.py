@@ -1,7 +1,7 @@
 import unittest
 
-from filtering_training.audit_dataset import audit_samples
-from filtering_training.prepare_dataset import DATASET_PATH, load_samples
+from filtering_training.datasets.audit_dataset import audit_samples
+from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
 
 
 class DatasetAuditTests(unittest.TestCase):

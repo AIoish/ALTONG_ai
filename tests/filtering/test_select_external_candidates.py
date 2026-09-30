@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from filtering_training.select_external_candidates import (
+from filtering_training.external.select_external_candidates import (
     FOLDERS, eligible_record, select_candidates,
 )
 
