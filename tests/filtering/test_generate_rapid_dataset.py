@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from filtering_training.generate_rapid_dataset import generate
-from filtering_training.prepare_dataset import DATASET_PATH, load_samples
-from filtering_training.prepare_holdout import notification_key
+from filtering_training.generation.generate_rapid_dataset import generate
+from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
+from filtering_training.datasets.prepare_holdout import notification_key
 from src.filtering.prompt import CATEGORIES
 
 

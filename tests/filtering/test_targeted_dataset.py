@@ -4,10 +4,10 @@ import unittest
 from collections import defaultdict
 from pathlib import Path
 
-from filtering_training.generate_rapid_dataset import generate as generate_base
-from filtering_training.generate_targeted_dataset import generate
-from filtering_training.prepare_dataset import load_samples
-from filtering_training.prepare_rapid_dataset import prepare
+from filtering_training.generation.generate_rapid_dataset import generate as generate_base
+from filtering_training.generation.generate_targeted_dataset import generate
+from filtering_training.datasets.prepare_dataset import load_samples
+from filtering_training.datasets.prepare_rapid_dataset import prepare
 from src.filtering.policy import should_pass
 
 

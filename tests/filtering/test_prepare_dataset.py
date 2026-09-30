@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from filtering_training.prepare_dataset import (
+from filtering_training.datasets.prepare_dataset import (
     DATASET_PATH,
     load_samples,
     prepare_dataset,

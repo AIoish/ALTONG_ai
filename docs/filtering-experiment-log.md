@@ -1209,3 +1209,229 @@ Qwen3-1.7B 재작성 4건도 일부 영어 원문을 그대로 출력하거나
 ```json
 {"urgency_score":2,"relevance_score":1,"category":"개인 중요","ai_summary_reason":"다음 달 참석 여부 결정 필요. 현재 다른 분야의 작업을 하고 있어 관련성이 낮음."}
 ```
+
+## 2026-09-30 - Frozen 100-case synthetic candidate comparison
+
+- Data: 100 new author-written Korean synthetic notifications, 12-13 per category; 27 urgent, 37 policy PASS, 63 BLOCK. Labels fixed before reading candidate outputs.
+- Data SHA-256: `f8d3e5e9ea27389a9043c26f2ce437797cd8e3b861bf0441955392dcd1a1f984`. Prompt SHA-256: `0820a8b9405212299385b5b9838cfb0c55650b0f6b4b3b5b6e73b5d0a8f82a63`.
+- Checked distinct IDs and normalized alert title/body against the local 5,000-row set, repeated development 24, and tracked sample data. No exact alert text overlap; stylistic independence is not established.
+- Gold labels are provisional and lack separate human review. No real private notification is included. Full dataset, predictions, audit, and adapters stay under Git-ignored local paths.
+- Same 100 inputs and prompt. Candidate pipelines differ in base model, training dataset (1.7B on prior 3,000 rows; 4B on expanded 5,000 rows), LoRA target modules, learning rate, and precision. Results cannot isolate model size.
+
+| Metric | Qwen3-1.7B LoRA 500 | Qwen3-4B Instruct NF4 QLoRA 500 |
+| --- | ---: | ---: |
+| Policy accuracy | 86/100 | 94/100 |
+| Valid JSON | 98/100 | 100/100 |
+| Explicit urgent false blocks | 4/27 | 2/27 |
+| Unnecessary passes | 3/63 | 2/63 |
+| Exact category | 73/100 | 85/100 |
+| Category macro F1, valid JSON | 0.7422 | 0.8477 |
+| Exact urgency | 68/100 | 79/100 |
+| Exact relevance | 43/100 | 67/100 |
+| Mean generation time/alert | 3.21 s | 7.70 s |
+
+- 4B policy errors: IDs 016 (today accessibility review, relevance underestimated), 022 (today customer reply, urgency overestimated), 031 and 034 (imminent meeting/appointment urgency underestimated), 033 (workshop change relevance underestimated), and 046 (already blocked login attempt urgency overestimated).
+- 4B has 100% policy decisions in urgent work, personal important, personal general, promotion, and other categories; meeting/schedule is 10/13. It still misses 2 of 27 urgent cases, so do not claim final safety.
+- Timing measures only model.generate, includes first generation, and excludes model loading, tokenization and parsing. 4B is materially slower despite lower quantized CUDA allocation.
+- This set is now development evidence because its results were inspected. Do not train on its 100 examples. Review labels and author a fresh unseen set before claiming generalization after tuning.
+
+### Actual unlabeled JSON inputs and adapter outputs
+
+The three examples below were rerun through `infer_sample --input-json` with the saved 4B adapter in new processes. Input JSON has no label; gold labels are shown separately for comparison.
+
+**Example 001**
+
+Input:
+```json
+{"notification":{"id":"independent_20260930_001","app_name":"Slack","sender":"Slack","title":"정산 금액 이상","body":"방금 배포한 반올림 코드 때문에 고객 정산 금액이 두 배로 기록되고 있습니다. 배치부터 멈춰 주세요.","timestamp":"2026-09-30T05:00:00Z"},"context":{"active_process":"Code.exe","window_title":"settlement_rounding.cs - Visual Studio Code","last_updated":"2026-09-30T05:00:00Z","duration_seconds":43,"recent_processes":["Code.exe","chrome.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":5,"relevance_score":5,"category":"긴급 업무","ai_summary_reason":"현재 수정 중인 정산 코드의 금전 오류가 진행 중이다."}
+```
+Model output:
+```json
+{"notification_id":"independent_20260930_001","is_passed":true,"urgency_score":5,"relevance_score":5,"category":"긴급 업무","ai_summary_reason":"정산 금액 이상 알림은 현재 열어 둔 작업과 직접 관련이 있으며 즉시 확인하거나 대응해야 합니다."}
+```
+
+**Example 068**
+
+Input:
+```json
+{"notification":{"id":"independent_20260930_068","app_name":"카카오톡","sender":"카카오톡","title":"오늘 저녁 약속","body":"오늘 저녁 식당 예약 인원을 정해야 해. 오후 중에 올 수 있는지 답해 줘.","timestamp":"2026-09-30T05:00:00Z"},"context":{"active_process":"KakaoTalk.exe","window_title":"오늘 저녁 약속 대화","last_updated":"2026-09-30T05:00:00Z","duration_seconds":12,"recent_processes":["KakaoTalk.exe","chrome.exe","Code.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":3,"relevance_score":5,"category":"개인 일반","ai_summary_reason":"오늘 필요한 개인 약속 응답이며 현재 같은 대화를 보고 있다."}
+```
+Model output:
+```json
+{"notification_id":"independent_20260930_068","is_passed":true,"urgency_score":3,"relevance_score":5,"category":"개인 중요","ai_summary_reason":"오늘 저녁 약속 알림은 현재 열어 둔 작업과 직접 관련이 있으며 비교적 빠른 확인이 필요합니다."}
+```
+
+**Example 080**
+
+Input:
+```json
+{"notification":{"id":"independent_20260930_080","app_name":"쇼핑 앱","sender":"쇼핑 앱","title":"쿠폰 만료 10분 전","body":"받아 둔 쿠폰이 10분 뒤 사라집니다. 사용하지 않아도 결제되는 금액은 없습니다.","timestamp":"2026-09-30T05:00:00Z"},"context":{"active_process":"Excel.exe","window_title":"업무 정산.xlsx","last_updated":"2026-09-30T05:00:00Z","duration_seconds":12,"recent_processes":["Excel.exe","chrome.exe","KakaoTalk.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":2,"relevance_score":1,"category":"광고/홍보","ai_summary_reason":"쿠폰 만료는 금전 피해 없는 광고이며 현재 업무와 무관하다."}
+```
+Model output:
+```json
+{"notification_id":"independent_20260930_080","is_passed":false,"urgency_score":2,"relevance_score":1,"category":"개인 일반","ai_summary_reason":"사용하지 않아도 결제되는 금액이 없는 쿠폰. 현재 다른 분야의 작업을 하고 있어 관련성이 낮음."}
+```
+
+Example 001 matches the gold category and policy. Examples 068 and 080 have correct policy decisions but wrong categories, so policy accuracy alone does not describe full-label quality.
+
+### Persistent inference probe
+
+The same three unlabeled JSON inputs were sent as newline-delimited JSON to one 4B process. Outputs matched the three single-call results exactly. One model load plus three predictions took 37.06 seconds end-to-end (12.35 seconds/request averaged across only three requests). This includes process startup and model loading. The 100-case per-alert generation mean remains 7.70 seconds with p95 9.76 seconds, so persistent loading does not eliminate generation latency. No Windows client integration has been tested.
+
+## 2026-09-30 - Continued 4B QLoRA, 250 additional steps
+
+- New run loaded the saved 500-step 4B NF4 adapter as trainable, kept the same 5,000-row dataset and 3,598/702 training/validation split, and used all-linear rank-8 LoRA with a fresh optimizer, seed 43 and learning rate 0.00002. The original adapter was preserved.
+- This is 250 further updates from the 500-step adapter, not a Trainer checkpoint/optimizer resume. It does not isolate the effect of training duration because the optimizer schedule and seed changed.
+- Full validation loss after the extra 250 updates was 0.2465 versus 0.2525 at the original 500 steps. Training plus validation took about 654.5 seconds. Lower loss did not improve policy behavior.
+- On the inspected synthetic 100-case development set, original 500-step adapter: 94/100 policy, 85/100 exact category, 2/27 urgent false blocks, 2/63 unnecessary passes, 7.70 s mean generation. Continued adapter: 92/100 policy, 85/100 exact category, 2/27 urgent false blocks, 2/63 unnecessary passes, 7.18 s mean generation.
+- New-only policy errors: independent_20260930_058, independent_20260930_092. Fixed prior policy errors: none. The source evaluation set was already inspected; this is model development, not a new blind result.
+- Decision: retain the original 500-step 4B adapter. Do not switch defaults or use the continued adapter for the demo. Do not move these 100 evaluation cases into training. Review borderline labels and add genuinely new evaluation cases before another training decision.
+
+### Actual inputs and before/after outputs
+
+**independent_20260930_058**
+
+Input:
+```json
+{"notification":{"id":"independent_20260930_058","app_name":"택배","sender":"택배","title":"본인 확인 안내","body":"해외 주문 통관에 본인 확인이 필요합니다. 오늘 중 앱에서 확인하면 됩니다.","timestamp":"2026-09-30T05:00:00Z"},"context":{"active_process":"chrome.exe","window_title":"해외 주문 배송 조회","last_updated":"2026-09-30T05:00:00Z","duration_seconds":110,"recent_processes":["chrome.exe","KakaoTalk.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":3,"relevance_score":4,"category":"개인 중요","ai_summary_reason":"오늘 필요한 배송 확인이 현재 배송 조회와 연관된다."}
+```
+Original 500-step output:
+```json
+{"urgency_score":3,"relevance_score":4,"category":"개인 중요","ai_summary_reason":"해외 주문 통관에 본인 확인이 필요합니다. 오늘 중 앱에서 확인하면 됩니다. 현재 창 제목에 같은 대상이 있어 직접 관련됨."}
+```
+Continued output:
+```json
+{"urgency_score":2,"relevance_score":4,"category":"개인 중요","ai_summary_reason":"해외 주문 통관에 본인 확인 안내 알림은 현재 열어 둔 작업과 직접 관련이 있으며 나중에 확인해도 됩니다."}
+```
+
+**independent_20260930_092**
+
+Input:
+```json
+{"notification":{"id":"independent_20260930_092","app_name":"기기 안내","sender":"기기 안내","title":"연결 완료","body":"책상 조명이 블루투스로 연결됐습니다. 밝기는 이전 설정으로 유지됩니다.","timestamp":"2026-09-30T05:00:00Z"},"context":{"active_process":"Code.exe","window_title":"http_retry.py - Visual Studio Code","last_updated":"2026-09-30T05:00:00Z","duration_seconds":12,"recent_processes":["Code.exe","chrome.exe","KakaoTalk.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":1,"relevance_score":1,"category":"기타","ai_summary_reason":"일반 주변 기기 상태 안내이며 현재 코드와 무관하다."}
+```
+Original 500-step output:
+```json
+{"urgency_score":1,"relevance_score":1,"category":"기타","ai_summary_reason":"책상 조명이 블루투스로 연결됐습니다. 밝기는 이전 설정으로 유지됩니다."}
+```
+Continued output:
+```json
+null
+```
+
+**independent_20260930_016**
+
+Input:
+```json
+{"notification":{"id":"independent_20260930_016","app_name":"Jira","sender":"Jira","title":"오늘 중 확인 부탁","body":"접근성 개선안에 담당자 의견이 필요합니다. 다음 논의를 위해 오늘 오후까지 코멘트 부탁드립니다.","timestamp":"2026-09-30T05:00:00Z"},"context":{"active_process":"Code.exe","window_title":"keyboard_navigation.ts - Visual Studio Code","last_updated":"2026-09-30T05:00:00Z","duration_seconds":12,"recent_processes":["Code.exe","chrome.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":3,"relevance_score":5,"category":"일반 업무","ai_summary_reason":"오늘 필요한 의견 요청이 현재 접근성 구현과 직접 관련된다."}
+```
+Original 500-step output:
+```json
+{"urgency_score":3,"relevance_score":3,"category":"일반 업무","ai_summary_reason":"접근성 개선안에 담당자 의견이 필요합니다. 다음 논의를 위해 오늘 오후까지 코멘트 부탁드립니다."}
+```
+Continued output:
+```json
+{"urgency_score":3,"relevance_score":3,"category":"일반 업무","ai_summary_reason":"접근성 개선안에 담당자 의견이 필요합니다. 다음 논의를 위해 오늘 오후까지 코멘트 부탁드립니다."}
+```
+
+## 2026-09-30 - New 80-case synthetic stress evaluation
+
+- 80 new authored Korean notifications (10 per category), gold labels frozen before either model output. No exact normalized title/body overlap with the 5,000-row training candidates, first 100-case evaluation, previous development 24, or tracked sample.
+- Data SHA-256: `cc05b7b1470f5b71b5b6d3e36acf0fe15c8d45fc3d1a4b1206a2e66c442c9e69`. Prompt SHA-256: `0820a8b9405212299385b5b9838cfb0c55650b0f6b4b3b5b6e73b5d0a8f82a63`. 24 urgent cases, 30 gold policy PASS cases.
+- Created after inspecting the first 100-case errors, so this is a targeted stress test, not an unbiased final blind evaluation. Labels were written by the same author and have not received independent human review. No private notification data was used.
+
+| Metric | Qwen3-1.7B LoRA 500 | Qwen3-4B NF4 QLoRA 500 |
+| --- | ---: | ---: |
+| Policy accuracy | 65/80 | 76/80 |
+| Valid JSON | 79/80 | 80/80 |
+| Urgent false blocks | 6/24 | 0/24 |
+| Unnecessary passes | 2/50 | 3/50 |
+| Exact category | 56/80 | 65/80 |
+| Category macro F1 on valid JSON | 0.6943 | 0.8161 |
+| Mean generation time | 3.10 s | 7.11 s |
+
+- 4B policy-error IDs: stress_20260930_019, stress_20260930_025, stress_20260930_043, stress_20260930_054. Urgent misses were zero on this stress set, but false passes remain. The 4B adapter remains the preferred development candidate; no default switch or model publication was performed.
+- Local blind review sheets and prediction-aware triage remain Git ignored under `filtering_training/outputs/independent_stress_80/review/`. Review the blind sheet first to avoid anchoring on model outputs.
+
+### Actual input, gold, and candidate outputs
+
+**stress_20260930_019**
+
+Input:
+```json
+{"notification":{"id":"stress_20260930_019","app_name":"Jira","sender":"Jira","title":"오후 문의 회신 요청","body":"재현한 UI 오탈자의 수정 일정을 오늘 오후까지 고객에게 알려 주세요.","timestamp":"2026-09-30T06:00:00Z"},"context":{"active_process":"KakaoTalk.exe","window_title":"친구와 산책 약속","last_updated":"2026-09-30T06:00:00Z","duration_seconds":145,"recent_processes":["KakaoTalk.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":3,"relevance_score":1,"category":"일반 업무","ai_summary_reason":"오늘 회신할 업무 문의지만 현재 개인 대화와 무관하다."}
+```
+1.7B output:
+```json
+{"urgency_score":3,"relevance_score":1,"category":"일반 업무","ai_summary_reason":"재현한 UI 오탈자의 수정 일정을 오늘 오후까지 고객에게 알려 주세요."}
+```
+4B output:
+```json
+{"urgency_score":4,"relevance_score":1,"category":"긴급 업무","ai_summary_reason":"오늘 오후 고객에게 수정 일정을 알려야 하는 오탈자 수정 요청. 현재 다른 분야의 개인 약속을 하고 있어 관련성이 낮음."}
+```
+
+**stress_20260930_025**
+
+Input:
+```json
+{"notification":{"id":"stress_20260930_025","app_name":"Google Calendar","sender":"Google Calendar","title":"내일 면접 장소 확정","body":"내일 면접은 별관 2층으로 확정됐습니다. 이동 준비에는 아직 하루가 남았습니다.","timestamp":"2026-09-30T06:00:00Z"},"context":{"active_process":"chrome.exe","window_title":"내일 면접 일정표","last_updated":"2026-09-30T06:00:00Z","duration_seconds":30,"recent_processes":["chrome.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":2,"relevance_score":5,"category":"일정/회의","ai_summary_reason":"현재 일정표와 연결되지만 급하게 대응할 상황은 아니다."}
+```
+1.7B output:
+```json
+{"urgency_score":3,"relevance_score":5,"category":"일정/회의","ai_summary_reason":"내일 면접 장소 확정 알림은 현재 열어 둔 작업과 직접 관련이 있으며 비교적 빠른 확인이 필요합니다."}
+```
+4B output:
+```json
+{"urgency_score":3,"relevance_score":4,"category":"개인 중요","ai_summary_reason":"내일 면접 장소 확정 알림은 현재 열어 둔 작업과 직접 관련이 있으며 비교적 빠른 확인이 필요합니다."}
+```
+
+**stress_20260930_043**
+
+Input:
+```json
+{"notification":{"id":"stress_20260930_043","app_name":"병원","sender":"병원","title":"오늘 예약 취소 기한","body":"내일 검사 예약을 취소해야 한다면 오늘 저녁까지 연락해 주세요. 그대로 방문하면 조치할 필요가 없습니다.","timestamp":"2026-09-30T06:00:00Z"},"context":{"active_process":"chrome.exe","window_title":"내일 검사 예약 관리","last_updated":"2026-09-30T06:00:00Z","duration_seconds":145,"recent_processes":["chrome.exe"]}}
+```
+Gold:
+```json
+{"urgency_score":2,"relevance_score":4,"category":"개인 중요","ai_summary_reason":"예약 관리 화면과 연결되지만 취소 여부는 선택이다."}
+```
+1.7B output:
+```json
+{"urgency_score":3,"relevance_score":5,"category":"개인 중요","ai_summary_reason":"내일 검사 예약 취소 기한 알림은 현재 열어 둔 작업과 직접 관련이 있으며 비교적 빠른 확인이 필요합니다."}
+```
+4B output:
+```json
+{"urgency_score":3,"relevance_score":5,"category":"개인 중요","ai_summary_reason":"오늘 예약 취소 기한 알림은 현재 열어 둔 작업과 직접 관련이 있으며 비교적 빠른 확인이 필요합니다."}
+```

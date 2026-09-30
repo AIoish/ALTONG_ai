@@ -7,12 +7,14 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
+from filtering_training import TRAINING_ROOT
+
 from src.filtering.prompt import build_messages, parse_model_output
 from src.filtering.schema import FilteringSample
 
 
-DATASET_PATH = Path(__file__).resolve().parent / "data" / "sample_notifications.jsonl"
-OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "prepared"
+DATASET_PATH = TRAINING_ROOT / "data" / "sample_notifications.jsonl"
+OUTPUT_DIR = TRAINING_ROOT / "outputs" / "prepared"
 
 
 def load_samples(path: Path) -> list[FilteringSample]:

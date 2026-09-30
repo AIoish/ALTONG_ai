@@ -1,0 +1,77 @@
+# 필터링 파일 안내
+
+2026-09-30 기준. 아래 경로는 `filtering_training/`을 기준으로 표시한다.
+이번 정리는 필터링 영역에 한정했다. 브리핑 코드·데이터·테스트와 공용 환경은 정리 대상에서 제외했다.
+
+## 현재 사용하는 파일
+
+| 경로 | 용도 |
+| --- | --- |
+| 상위 학습·평가 모듈, `datasets/`, `generation/`, `external/`, `review/`, `checks/`, `requirements.txt` | 데이터 생성·검증·학습·평가·추론 도구. 기존 테스트와 실험 재현에 필요하므로 유지 |
+| `data/` | 필터링 원본·샘플·평가 데이터 |
+| `outputs/candidates/`, `outputs/audit/` | 합성 데이터 후보와 품질 점검 결과 |
+| `outputs/prepared_targeted_5000/` | 5,000행 확장 데이터의 학습·검증·테스트 분할 |
+| `outputs/prepared/`, `outputs/prepared_rapid/`, `outputs/holdout/` | 이전 데이터 분할과 실험 재현용 manifest |
+| `outputs/evaluation/` | 이전 모델의 평가 지표와 예측 예시 |
+| `outputs/independent_eval_100/`, `outputs/independent_stress_80/` | 개발 비교용 평가셋, 예측, 라벨 검수표. 학습에 혼합하지 않음 |
+| `outputs/lora-rapid-qwen3-1_7b-500/` | 비교 기준인 1.7B 500스텝 어댑터와 설정 |
+| `outputs/qlora-qwen3-4b-500-20260930/` | 현재 4B 개발 후보의 최종 어댑터, 학습 설정과 로그 |
+| `outputs/models/` | 4B NF4 기본 모델. 위 4B 어댑터를 실행하는 데 필요 |
+| `outputs/portability_probe/`, `outputs/portability_probe.py` | CPU 시험용 GGUF 기본 모델, llama.cpp 실행 파일, 다운로드 검증 기록과 시험 스크립트 |
+| `outputs/external/` | 외부 데이터의 출처·검토 자료. 이용 범위와 라벨 검토 상태를 확인한 뒤 사용 |
+| `outputs/archive/` | 과거 실험의 압축 보관본 |
+| `outputs/_maintenance/` | 이번 정리에 사용한 로컬 점검·보관 스크립트 |
+
+NF4 기본 모델과 CPU용 GGUF 기본 모델은 서로 다른 실행 형식이다.
+GGUF 파일에 4B QLoRA 어댑터의 학습 결과가 포함된 것으로 간주하면 안 된다.
+모델·원본 데이터·로컬 산출물은 계속 Git에서 제외한다.
+
+## 이번에 보관한 과거 실험
+
+보관 위치는 `outputs/archive/20260930-before-encoder/historical-experiments.zip`이다.
+각 파일의 기존 경로·크기·SHA-256 및 정리 결과는 같은 폴더의 `manifest.json`에 기록했다.
+ZIP의 모든 파일을 원본과 대조한 후 기존 위치의 파일을 제거했다. 아래 자료는 ZIP에서 복원할 수 있다.
+
+- 초기 0.6B 시험: `lora-smoke`, `lora-smoke-bf16`, `lora-smoke-51`
+- 0.6B 파일럿: `lora-rapid-pilot-100`, `lora-rapid-pilot-500`, `lora-rapid-short-500`
+- 1.7B 전체 1회 학습: `lora-qwen3-1_7b-epoch1-20260928`
+- 4B 시험·추가 학습: `qlora-qwen3-4b-smoke-20260930`, `qlora-qwen3-4b-continue250-20260930`
+- 4B 후보의 Trainer 체크포인트: `qlora-qwen3-4b-500-20260930/trainer/`
+- 완료된 데이터·문서 작업용 스크립트 9개: `add_experiment_inputs.py`, `append_holdout_log.py`,
+  `check_reference_privacy.py`, `compare_real_samples.py`, `create_holdout_draft.py`, `mix_holdout.py`,
+  `replace_holdout_log.py`, `rewrite_holdout_realistic.py`, `verify_holdout_log.py`
+
+각 실험의 가중치·설정·로그와 Trainer의 optimizer 상태도 압축본에 보존했다.
+현재 4B 후보의 `adapter/`와 `run_config.json`은 원래 경로에 남아 있다.
+과거 실험 기록에 적힌 경로를 사용하려면 해당 자료를 먼저 복원한다.
+
+## 복원 방법
+
+저장소 루트에서 아래 명령으로 새 복원 폴더에 압축을 푼다.
+이미 `restored`가 있다면 다른 새 폴더 이름을 사용한다.
+
+```powershell
+Expand-Archive -LiteralPath filtering_training/outputs/archive/20260930-before-encoder/historical-experiments.zip -DestinationPath filtering_training/outputs/archive/20260930-before-encoder/restored
+```
+
+압축 내부 경로는 원래 `outputs/` 아래의 경로와 동일하다.
+필요한 실험 폴더를 복원 폴더에서 원래 `outputs/` 위치로 옮긴다.
+같은 이름의 폴더가 새로 생성되어 있다면 덮어쓰지 말고 별도 위치에서 비교한다.
+일회성 스크립트는 데이터를 수정하거나 실험 문서를 다시 작성할 수 있으므로, 복원만으로 실행하지 않는다.
+
+## 삭제 및 검증 결과
+
+- 압축 보관: 실험·체크포인트 폴더 10개와 일회성 스크립트 9개, 총 100파일.
+- 압축 전 426,456,592바이트 → 압축 후 256,766,187바이트.
+- 중복 다운로드 삭제: `llama-b11269-bin-win-cpu-x64.zip`, `llama-b11282-bin-win-cpu-x64.zip`.
+  ZIP 안의 모든 파일을 이미 풀어 둔 해당 버전의 실행 파일과 SHA-256으로 비교했다.
+  실행 파일은 보존했다. 다운로드 시험 스크립트를 다시 실행하면 ZIP이 다시 생성될 수 있다.
+- 캐시 삭제: `filtering_training`, `src/filtering`, `tests/filtering` 아래의 `__pycache__` 4개, 총 37파일.
+  Python 실행 시 다시 생성될 수 있다.
+- 확보한 파일 용량: 208,409,050바이트, 약 **199MiB**.
+  새 안내 문서·manifest의 소량 용량과 파일시스템 할당 단위는 제외한 값이다.
+- 데이터·평가 결과·비교 모델·소스·문서·브리핑 영역 등 보존 대상 234파일의 SHA-256과
+  파일 수를 정리 전후 대조했다. 모두 동일했다.
+
+학습 코드와 모델 동작은 변경하지 않았다.
+검증은 보관본의 내용 일치 및 보존 파일의 무결성 확인으로 수행했다.

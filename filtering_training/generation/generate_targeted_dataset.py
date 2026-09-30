@@ -11,14 +11,16 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from filtering_training.audit_dataset import audit_samples
-from filtering_training.generate_rapid_dataset import OUTPUT_PATH as BASE_DATASET
-from filtering_training.prepare_dataset import load_samples
-from filtering_training.prepare_holdout import HOLDOUT_PATH, notification_key
+from filtering_training import TRAINING_ROOT
+
+from filtering_training.datasets.audit_dataset import audit_samples
+from filtering_training.generation.generate_rapid_dataset import OUTPUT_PATH as BASE_DATASET
+from filtering_training.datasets.prepare_dataset import load_samples
+from filtering_training.datasets.prepare_holdout import HOLDOUT_PATH, notification_key
 from src.filtering.prompt import CATEGORIES, parse_model_output
 from src.filtering.schema import FilteringSample
 
-ROOT = Path(__file__).resolve().parent / "outputs"
+ROOT = TRAINING_ROOT / "outputs"
 OUTPUT_PATH = ROOT / "candidates" / "targeted_korean_2000.jsonl"
 COMBINED_PATH = ROOT / "candidates" / "combined_korean_5000.jsonl"
 

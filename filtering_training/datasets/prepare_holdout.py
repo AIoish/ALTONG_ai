@@ -6,13 +6,15 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from filtering_training.prepare_dataset import DATASET_PATH, load_samples
+from filtering_training import TRAINING_ROOT
+
+from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
 from src.filtering.prompt import CATEGORIES
 from src.filtering.schema import FilteringSample
 
 
-HOLDOUT_PATH = Path(__file__).resolve().parent / "data" / "evaluation_notifications.jsonl"
-OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "holdout"
+HOLDOUT_PATH = TRAINING_ROOT / "data" / "evaluation_notifications.jsonl"
+OUTPUT_DIR = TRAINING_ROOT / "outputs" / "holdout"
 
 
 def notification_key(sample: FilteringSample) -> tuple[str, ...]:
