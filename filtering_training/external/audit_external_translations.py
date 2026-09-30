@@ -5,9 +5,11 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from filtering_training.translate_external_candidates import OUTPUT_PATH as INPUT_PATH
+from filtering_training import TRAINING_ROOT
 
-REPORT_PATH = Path(__file__).resolve().parent / "outputs" / "audit" / "external_translation_audit.json"
+from filtering_training.external.translate_external_candidates import OUTPUT_PATH as INPUT_PATH
+
+REPORT_PATH = TRAINING_ROOT / "outputs" / "audit" / "external_translation_audit.json"
 DIGITS = re.compile(r"\d+")
 HANGUL = re.compile(r"[가-힣]")
 

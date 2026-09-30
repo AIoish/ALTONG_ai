@@ -9,9 +9,11 @@ import json
 import time
 from pathlib import Path
 
-from filtering_training.select_external_candidates import OUTPUT_PATH as SOURCE_PATH
+from filtering_training import TRAINING_ROOT
 
-OUTPUT_PATH = Path(__file__).resolve().parent / "outputs" / "external" / "notifai" / "translated_candidates.jsonl"
+from filtering_training.external.select_external_candidates import OUTPUT_PATH as SOURCE_PATH
+
+OUTPUT_PATH = TRAINING_ROOT / "outputs" / "external" / "notifai" / "translated_candidates.jsonl"
 MODEL_NAME = "facebook/m2m100_418M"
 
 

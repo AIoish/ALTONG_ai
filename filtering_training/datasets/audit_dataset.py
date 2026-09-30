@@ -5,13 +5,15 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from filtering_training.prepare_dataset import DATASET_PATH, load_samples
+from filtering_training import TRAINING_ROOT
+
+from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
 from src.filtering.policy import should_pass
 from src.filtering.prompt import CATEGORIES
 from src.filtering.schema import FilteringSample
 
 
-DEFAULT_REPORT = Path(__file__).resolve().parent / "outputs" / "audit" / "dataset_audit.json"
+DEFAULT_REPORT = TRAINING_ROOT / "outputs" / "audit" / "dataset_audit.json"
 
 
 def _notification_key(sample: FilteringSample) -> tuple[str, ...]:

@@ -1,320 +1,70 @@
-# Filtering model training
+# 필터링 학습·평가 도구
 
-This directory contains offline dataset preparation, validation, model training,
-and evaluation tools for the real-time filtering model.
+실시간 알림 필터링을 위한 데이터 준비, 학습, 평가 코드를 관리합니다.
+앱에서 사용하는 스키마·프롬프트·정책은 `src/filtering`에 있습니다.
+명령은 저장소 루트에서 실행합니다.
 
-Application runtime code remains in `src/filtering`. Training code may import
-the shared schemas, prompts, and policy from that package, but runtime code must
-not import from `filtering_training`.
+## 폴더 구성
 
-## Setup
+```text
+filtering_training/
+  train.py                 Qwen LoRA·QLoRA 학습
+  evaluate.py              모델 평가
+  infer_sample.py          JSON 입력·스트림 추론
+  compare_evaluations.py   평가 결과 비교
+  datasets/                데이터 검증·감사·학습/평가 분할
+  generation/              합성 데이터 생성·5,000행 확장
+  external/                외부 후보 선택·번역·검토
+  review/                  라벨 검수표 작성
+  checks/                  정책 데모·모델 로딩 시험
+  docs/                    상세 실행 안내·산출물 보관 안내
+  data/                    로컬 데이터와 추적 중인 샘플
+  outputs/                 모델·평가 결과·과거 실험 보관본
+```
 
-Install the CUDA-compatible PyTorch build as described in the repository root
-README, then install the training dependencies:
+`__init__.py`의 `TRAINING_ROOT`를 기준으로 기본 데이터·산출물 경로를 계산합니다.
+폴더를 옮겨도 데이터와 모델의 저장 위치는 기존 `data/`, `outputs/`를 사용합니다.
+
+## 설치와 기본 확인
+
+공통 환경과 CUDA PyTorch 설치는 저장소 루트 README를 참고합니다.
 
 ```powershell
 python -m pip install -r filtering_training/requirements.txt
+python -m filtering_training.datasets.validate_dataset
+python -m filtering_training.checks.demo_policy
+python -B -m unittest discover -s tests/filtering -v
 ```
 
-## Current checks
+## 자주 사용하는 명령
 
-Run these commands from the repository root:
+| 작업 | 실행 명령 |
+| --- | --- |
+| 샘플을 SFT 데이터로 변환 | `python -m filtering_training.datasets.prepare_dataset` |
+| 데이터 품질 점검 | `python -m filtering_training.datasets.audit_dataset --help` |
+| 평가셋 준비 | `python -m filtering_training.datasets.prepare_holdout --help` |
+| 기존 3,000행 생성 | `python -m filtering_training.generation.generate_rapid_dataset --help` |
+| 5,000행 확장 | `python -m filtering_training.generation.generate_targeted_dataset --help` |
+| 상황 유형별 분할 | `python -m filtering_training.datasets.prepare_rapid_dataset --help` |
+| 라벨 검수표 작성 | `python -m filtering_training.review.prepare_label_review --help` |
+| 학습·평가·추론·비교 | 상위 폴더의 네 모듈에 `--help` 사용 |
 
-```powershell
-python -m filtering_training.validate_dataset
-python -m filtering_training.demo_policy
-python -m filtering_training.smoke_test_model
-```
+생성·분할 명령은 출력 파일을 만들므로, 기존 실험을 보존하려면 상세 안내에서
+입력·출력 경로를 확인합니다. 모델 로딩 시험은
+`python -m filtering_training.checks.smoke_test_model`이며 모델 다운로드·GPU 사용이 발생할 수 있습니다.
 
-Generated checkpoints, adapters, and experiment outputs belong under
-`filtering_training/outputs` and must not be committed.
+## 상세 문서
 
-## One-sample model check
+- [기존 학습·평가·데이터 작업 안내](docs/WORKFLOWS.md): 이전 README의 설명과 실험 기록을 보존했습니다.
+- [모델·데이터 위치와 과거 실험 복원](docs/ARTIFACTS.md)
+- [필터링 실험 기록](../docs/filtering-experiment-log.md)
+- [필터링 라벨링 기준](../docs/filtering-labeling-guideline.md)
 
-```powershell
-python -m filtering_training.infer_sample --sample-index 0
-```
+2026-09-30 폴더 정리로 보조 도구의 모듈 경로가 바뀌었습니다.
+예: `filtering_training.prepare_dataset` → `filtering_training.datasets.prepare_dataset`.
+기존 명령·개인 스크립트는 위 폴더 구성을 기준으로 경로를 바꿔 실행합니다.
+압축 보관한 과거 스크립트도 복원 후 import 경로를 갱신해야 합니다.
+학습·평가·추론·결과 비교의 네 가지 상위 모듈 경로는 같습니다.
 
-This runs `Qwen/Qwen3-1.7B` with thinking disabled, validates the four-field
-label JSON, and applies the existing policy. The base model has not been
-fine-tuned, so this command checks the input/output path rather than accuracy.
-
-## Prepare SFT data
-
-```powershell
-python -m filtering_training.prepare_dataset
-```
-
-The command validates the samples and writes train, validation, and test JSONL
-files plus a split manifest to `filtering_training/outputs/prepared`. The
-current synthetic examples are only for pipeline checks. Notifications with the
-same text and different contexts stay in one split. The assistant target contains
-only the four model label fields; the prompt includes the normalized current
-context. The three splits are not a reliable quality benchmark yet.
-
-## Baseline evaluation and LoRA smoke run
-
-```powershell
-python -m filtering_training.evaluate --split test
-python -m filtering_training.train --max-steps 2
-python -m filtering_training.evaluate --split test --adapter filtering_training/outputs/lora-smoke/adapter
-```
-
-Run `prepare_dataset` first. Evaluation writes aggregate metrics and run metadata
-to `filtering_training/outputs/evaluation`; it does not save raw notifications.
-Model responses are not saved unless `--examples-output` is provided. By default, evaluation prints three model JSON examples; use
-`--examples-output PATH` to save those examples as UTF-8 JSON. Record reviewed
-experiment results and 3-5 examples in `docs/filtering-experiment-log.md`.
-The trainer saves a LoRA adapter and run settings under
-`filtering_training/outputs/lora-smoke`. It trains only on the assistant JSON
-completion and verifies that prompt tokens are masked from the loss. On GPUs that
-support it, the trainer uses BF16; otherwise it uses FP16.
-
-The original 34-sample test split had three synthetic examples, including one urgent
-notification. Its saved base/adapter reports belong to that dataset snapshot. Run
-the baseline again after changing the dataset or split. These numbers cannot establish
-model quality. The next quality step is a larger, independently reviewed dataset.
-
-## Synthetic data audit
-
-```powershell
-python -m filtering_training.audit_dataset
-```
-
-This writes aggregate label and context coverage to
-`filtering_training/outputs/audit/dataset_audit.json`. Review the aggregate findings before expanding the dataset.
-
-## Provisional development evaluation set
-
-The 24 hand-written synthetic cases in
-`filtering_training/data/evaluation_notifications.jsonl` are separate from the
-51 training-pipeline samples. Their labels still need independent review, so this
-is a development evaluation set rather than a final quality benchmark.
-These 24 cases were used repeatedly for model and data choices. Use a new untouched,
-independently reviewed local set for final reporting.
-This 24-case file is local and Git-ignored: supply it locally to run holdout
-evaluation. Repository tests create temporary synthetic fixtures instead.
-
-The local, Git-ignored `filtering_training/data/real_notifications_sample.json` is
-a reference for realistic notification types and wording, not a quota for app names
-or topics. The holdout mixes those patterns with other plausible cases. Do not copy
-personal content into synthetic data. Raw `sender: null` values normalize to an empty
-string in the existing dataset/model-input schema.
-
-```powershell
-python -m filtering_training.prepare_holdout
-python -m filtering_training.audit_dataset --dataset filtering_training/data/evaluation_notifications.jsonl --minimum-per-category 3
-python -m filtering_training.evaluate --dataset filtering_training/data/evaluation_notifications.jsonl --prepared-dir filtering_training/outputs/holdout --split test
-```
-
-`prepare_holdout` rejects matching IDs or notification text and creates a
-test-only manifest. It does not create a training split. Rebuild the manifest
-after editing the holdout dataset; evaluation rejects a stale holdout manifest.
-Rerun `prepare_holdout` after changing training data to check for new overlap.
-The example outputs and metrics for the first run are recorded in
-`docs/filtering-experiment-log.md`.
-
-## Synthetic training candidates (batch 01)
-
-```powershell
-python -m filtering_training.generate_synthetic_candidates
-```
-
-The generator writes 192 candidate records to the Git-ignored
-`filtering_training/outputs/candidates/synthetic_batch_01.jsonl`: 64 manually
-written notification texts across all eight categories, each paired with
-topic-adjacent, unrelated, and empty contexts. This is 64 distinct notifications, not
-192 independent notification types. The private real-notification file is a
-reference for plausible app names and short notification wording; the generator
-does not read it. The other cases deliberately cover a wider range of work,
-calendar, system, personal, and promotional notifications.
-
-These labels and the generated `ai_summary_reason` text are provisional. Review
-them before moving any candidates into the versioned training dataset or running
-a full training job. Keep the separate 24-case development evaluation set out of training.
-
-## External notification source and processing
-
-Source: [NotifAI synthetic notification dataset](https://huggingface.co/datasets/charlesfeng1/notifai-dataset).
-Its dataset card states Apache 2.0 (the dataset API has no structured license
-field). The downloaded `training_data.jsonl` contained
-10,800 rows (SHA-256 `4e66f9070c5c9bf6bad30fc414feecf07ec6a5c9f7b72980edd00abf632546c9`);
-the card's 16,000-row statement does not match that file. The original file is kept
-only in the Git-ignored `filtering_training/outputs/external/notifai` directory.
-
-```powershell
-New-Item -ItemType Directory -Force filtering_training/outputs/external/notifai | Out-Null
-Invoke-WebRequest -Uri 'https://huggingface.co/datasets/charlesfeng1/notifai-dataset/resolve/e641bb311e31c6582143866eed37c88adf1ed8f9/training_data.jsonl' -OutFile filtering_training/outputs/external/notifai/training_data.jsonl
-python -m filtering_training.select_external_candidates
-python -m filtering_training.adapt_external_pilot
-```
-
-Selection removes malformed rows, repeated title/body pairs, overly short or long
-texts, non-English alphabetic scripts, and obvious email/URL/long-number patterns.
-It then chooses 3,000 local review candidates, 750 from each source folder, with
-at most 300 from any one app. Source folders and priorities are selection metadata,
-not ALTONG labels. This does not guarantee removal of all personal information;
-review is still required. The resulting 3,000 English texts are **not** the 3,000
-Korean training samples. They are references for writing new Korean cases,
-not text to translate wholesale.
-
-The 58-case pilot uses source notification ideas, rewrites the wording in Korean,
-adapts app names to the Windows setting, adds fictional `CurrentContext` values,
-and assigns all four ALTONG labels from the project guideline. It does not copy
-source priority into `urgency_score`; the source ID mapping is preserved in the
-Git-ignored pilot provenance file. The added cases cover all eight categories,
-including neutral status notices labeled `기타`, and recent-process lengths 0-3.
-A few fictional role labels exercise `sender`; no personal names are used.
-These pilot labels remain provisional and the pilot is not used for model
-training or the separate development evaluation set. The low count of relevance score 2 and
-the concentration of `기타` in repository notices remain coverage gaps.
-
-## Fast external-source translation draft
-
-The selected 3,000 public English notifications can be translated in one GPU batch
-using [M2M100 418M](https://huggingface.co/facebook/m2m100_418M) (MIT license).
-The source is the Apache-2.0 NotifAI dataset linked above. Run:
-
-```powershell
-python -m filtering_training.translate_external_candidates --limit 50 --output filtering_training/outputs/external/notifai/translated_50.jsonl
-python -m filtering_training.translate_external_candidates --limit 3000
-python -m filtering_training.audit_external_translations
-```
-
-The translator keeps the public source ID and English title/body beside its Korean
-draft for comparison. It deliberately discards source priority; no ALTONG context
-or label is assigned. The output, manifest, and audit report stay Git-ignored.
-On the local RTX 3060 Laptop GPU, the 3,000-draft run took about 135 seconds after
-model loading. The first audit flagged 98 source IDs: 22 with an empty field, 69
-with at least one missing source number, 11 with a duplicate translation, and 19
-with very short output; reasons can overlap. Unflagged rows can still contain
-mistranslations or omitted clauses. A four-case Qwen3-1.7B rewrite probe also
-copied English verbatim in some cases, so it did not replace the review stage.
-
-These 3,000 records are translation drafts, **not** 3,000 training samples.
-Before training, rewrite or reject poor translations, add realistic Windows
-contexts, assign ALTONG labels independently of the source folder/priority,
-and check overlap with training and holdout notification families.
-## Rapid Korean candidate set (3,000 rows)
-
-No generation API or local translation model is needed for this path. Codex-authored
-Korean notification scenarios, ten topic choices per scenario, and four meaningful
-time/impact/action details produce deterministic candidates. The public NotifAI
-dataset above and the private real sample informed broad notification types only;
-this generator does not read or copy either file. It writes only to Git-ignored
-outputs and keeps the original `notification`/`context`/`label` JSON schema.
-
-```powershell
-python -m filtering_training.generate_rapid_dataset
-python -m filtering_training.audit_dataset --dataset filtering_training/outputs/candidates/rapid_korean_3000.jsonl --minimum-per-category 3
-python -m filtering_training.prepare_rapid_dataset
-```
-
-The output has 3,000 distinct title/body pairs, 375 per category, but only 80
-authored scenario families. Its `.lineage.json` records each family's identity.
-`prepare_rapid_dataset` holds out one complete family per category for validation
-and one for test; current counts are 2,398 train, 302 validation, 300 test.
-The prepared SFT files and manifest are Git-ignored. They are **provisional**:
-automatic schema and overlap checks do not establish natural Korean wording,
-correct labels, or generalization to real notifications. Review representative
-cases and add independently written cases before treating results as release evidence. Keep the separate
-24-case human-authored holdout out of this candidate set and its training split.
-## Current model choice (2026-09-28)
-
-The default training, evaluation, and sample inference model is now
-`Qwen/Qwen3-1.7B`. The 500-step local comparison favored it over 0.6B, and BF16
-LoRA training succeeded on the RTX 3060 Laptop GPU. The 500-step adapter still
-blocked five of nine urgent development cases, so it is not a release model.
-The earlier 0.6B experiments remain in the experiment log. On 2026-09-29, a fresh
-1.7B LoRA run completed one pass over all 2,398 training rows in about 1,007 seconds.
-On the same 24 development cases, policy accuracy fell from 19/24 to 17/24 and
-urgent false blocks increased from 5/9 to 6/9. The full-pass adapter is not adopted
-as the new baseline; the 500-step adapter remains a development comparison only.
-Both adapters and all generated datasets stay local and Git-ignored.
-
-Next: add 2,000 rows, 250 per category, with new scenario families and balanced
-IT work, personal, promotional, and neutral cases. Prioritize realistic short
-messages, deadlines, impact, and context relevance without copying development
-evaluation sentences. Recheck labels and family overlap, then retrain and measure
-on an untouched final evaluation set. The repeated 24-case set is for development.
-
-## Targeted extension (2026-09-29): 5,000 local rows
-
-```powershell
-python -m filtering_training.generate_targeted_dataset
-python -m filtering_training.prepare_rapid_dataset --dataset filtering_training/outputs/candidates/combined_korean_5000.jsonl --output-dir filtering_training/outputs/prepared_targeted_5000 --preserve-manifest filtering_training/outputs/prepared_rapid/manifest.json
-```
-
-The added 2,000 rows contain 1,000 new title/body pairs with two contrasting
-contexts each. Forty new scenario families cover operational failures, routine
-IT work, imminent schedules, device/security states, personal deadlines, casual
-messages, advertising, and neutral notices. All eight categories add 250 rows.
-Urgency and category stay constant within context pairs; relevance changes.
-Optional marketing deadlines and benign uses of 'now' are included as negatives.
-Labels explain impact/deadline evidence and context relevance; they are provisional.
-No raw private sample or development-evaluation text is used as source wording.
-
-The combined dataset has 5,000 rows, 4,000 distinct title/body pairs, 120 families,
-and 625 rows/category. Original validation/test assignments are preserved. New
-context pairs remain in the same family and split. Prepared counts are 3,598
-train, 702 validation, and 700 test; not all 5,000 rows are used for training.
-Dataset, lineage, audit, and SFT files stay under ignored `outputs/`. Automatic
-checks establish schema/overlap consistency, not independent label correctness
-or model improvement. Retraining and unused evaluation data are still required.
-
-## 4-bit base-model comparison
-
-The default remains Qwen3-1.7B. A larger candidate can be evaluated without training:
-
-```powershell
-python -m filtering_training.evaluate --dataset filtering_training/data/evaluation_notifications.jsonl --prepared-dir filtering_training/outputs/holdout --split test --model Qwen/Qwen3-4B-Instruct-2507 --load-in-4bit --output filtering_training/outputs/evaluation/qwen3_4b_instruct_nf4_dev24.json --examples-output filtering_training/outputs/evaluation/qwen3_4b_instruct_nf4_predictions24.json --show-examples 24
-```
-
-For an original checkpoint, this requests bitsandbytes NF4 with double quantization and FP16 computation. A prequantized checkpoint uses its stored quantization configuration; the report records the actual settings. It loads
-entirely on CUDA device 0; it does not silently offload to CPU. Initial download
-uses the original checkpoint size, not the quantized in-memory size. The report
-records quantization, raw responses, per-case generation time, model footprint,
-and peak CUDA allocated/reserved memory. Timings exclude loading, tokenization,
-and parsing and include the first generation; they are not end-to-end latency.
-CUDA allocation statistics exclude some driver/library memory, so they are not
-identical to `nvidia-smi`. Evaluation results remain local under ignored outputs.
-The repeated 24 cases are development data, not a blind final test. Compare base
-models separately from trained adapters and record precision differences.
-
-The 2026-09-30 local run used the checksum-verified Unsloth prequantized distribution
-of Qwen3-4B-Instruct-2507 (NF4, double quantization, BF16 computation), after the
-original download stalled. Local model path:
-`filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit`.
-Evaluate that path with the same command's `--model` argument. No Unsloth runtime
-or new training was used. On the repeated development 24, policy accuracy was
-17/24, urgent false blocks 1/9, and unnecessary passes 6/14. Mean generation time
-was 6.53 seconds/case, and observed GPU memory was about 2,923 MiB. These are
-local development results and do not establish final quality or QLoRA training fit.
-The default remains Qwen3-1.7B pending a trained-candidate comparison.
-
-## QLoRA training on the local 4B checkpoint
-
-```powershell
-python -m filtering_training.train --prepared-dir filtering_training/outputs/prepared_targeted_5000 --run-dir filtering_training/outputs/qlora-qwen3-4b-smoke-20260930 --model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit --qlora --max-steps 2 --learning-rate 0.0001 --lora-targets all-linear
-```
-
-Use a fresh run directory for each experiment. `--qlora` loads the base entirely
-on CUDA 0, prepares k-bit training, and trains adapters only. The 2-step reload
-probe succeeded on the local 6GB GPU; this is pipeline evidence, not quality
-or worst-case memory evidence. `--save-steps 250 --eval-steps 250` enables
-checkpoint saving and teacher-forced validation loss on the prepared validation
-split. Validation loss is not policy accuracy. The run configuration records
-actual quantization, data/model provenance, trainable parameter count, training
-metrics, validation history, and peak CUDA allocation. Default model remains
-1.7B, ordinary LoRA remains available, and generated data/adapters stay local.
-
-The 2026-09-30 QLoRA experiment completed 500 steps over the expanded 3,598-row
-training split, with all-linear rank-8 adapters and learning rate 0.0001. Full
-702-row validation loss improved from 0.2815 at step 250 to 0.2525 at step 500.
-Training plus both validations took about 1,270 seconds and peak CUDA reserved
-memory was 4.95 GiB. On the repeated development 24, policy decisions were 24/24,
-urgent false blocks 0/9, and unnecessary passes 0/14. Category accuracy was 18/24,
-so this is not perfect prediction of all output fields. Mean generation time was
-7.89 seconds/case. The adapter is a promising development candidate, pending
-untouched evaluation, label review, and latency work. No default model switch,
-training beyond 500 steps, commit, or push was performed.
+현재 Qwen 기본 모델과 학습 방식은 기존 설정을 사용합니다.
+RoBERTa 분류 모델 실험은 별도 후속 작업입니다.

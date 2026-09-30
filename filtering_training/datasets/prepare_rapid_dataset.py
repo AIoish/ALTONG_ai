@@ -7,12 +7,14 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from filtering_training.generate_rapid_dataset import OUTPUT_PATH
-from filtering_training.prepare_dataset import load_samples, to_sft_record
+from filtering_training import TRAINING_ROOT
+
+from filtering_training.generation.generate_rapid_dataset import OUTPUT_PATH
+from filtering_training.datasets.prepare_dataset import load_samples, to_sft_record
 from src.filtering.prompt import CATEGORIES
 
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "prepared_rapid"
+OUTPUT_DIR = TRAINING_ROOT / "outputs" / "prepared_rapid"
 
 
 def prepare(dataset: Path = OUTPUT_PATH, output_dir: Path = OUTPUT_DIR,
