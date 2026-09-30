@@ -29,17 +29,34 @@ Choose another synthetic case with `--case-index`:
 python -m briefing_training.smoke_test_model --case-index 1
 ```
 
-## Run the fixed evaluation set
+## Run the human-reviewed evaluation set
 
 ```powershell
 python -m briefing_training.evaluate
 ```
 
+The fixed evaluation set contains 20 synthetic cases across all eight official
+categories. Eight original regression cases are retained, and twelve diverse
+cases cover in-progress incidents, review feedback, completed security actions,
+rescheduling, changed delivery locations, promotions, and corrected notices.
+
 The evaluator reports structured JSON compliance, expected-fact coverage,
 superseded-state violations, per-case pass rate, and average generation latency.
 Fact alternatives allow equivalent source expressions such as recovery and
-normalization. These metrics are a small baseline check, not a final
-model-quality benchmark.
+normalization. Each case also contains a human-written reference summary for
+manual review; the reference is never used for fine-tuning or exact-match
+scoring. These metrics remain an MVP benchmark rather than a final model-quality
+claim.
+
+Write both the machine-readable result and a Markdown report that compares the
+source notifications, human reference, and model output:
+
+```powershell
+python -m briefing_training.evaluate `
+  --adapter-path <local-adapter-directory> `
+  --output outputs/evaluation.json `
+  --review-output outputs/evaluation-review.md
+```
 
 Generated checkpoints, adapters, and experiment outputs must remain under an
 ignored `outputs` directory. Never add real notifications or personal data.
@@ -54,7 +71,7 @@ python -m briefing_training.prepare_dataset
 ```
 
 The default command writes 200 training cases to `data/train_cases.jsonl` and
-40 validation cases to `data/validation_cases.jsonl`. The fixed eight-case
+40 validation cases to `data/validation_cases.jsonl`. The fixed 20-case
 `evaluation_cases.jsonl` file remains separate and must not be used for
 fine-tuning. Validation cases use held-out entities and November dates, while
 training cases use October dates. All eight official filter categories are

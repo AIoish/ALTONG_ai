@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+
+from src.briefing.schema import FILTER_CATEGORIES
 
 from .prompts import MODEL_NAME, parse_summary_response
 from .smoke_test_model import (
@@ -52,6 +54,118 @@ def _max_summary_lines(case: Mapping[str, Any]) -> int:
     return value
 
 
+def _reference_summary_lines(case: Mapping[str, Any]) -> tuple[str, ...]:
+    lines = case.get("reference_summary_lines", [])
+    if not isinstance(lines, list) or not lines or not all(
+        isinstance(line, str) and line.strip() for line in lines
+    ):
+        raise ValueError(
+            "reference_summary_lines must be a non-empty array of strings"
+        )
+    normalized = tuple(line.strip() for line in lines)
+    if len(normalized) > _max_summary_lines(case):
+        raise ValueError("reference_summary_lines exceeds max_summary_lines")
+    return normalized
+
+
+def validate_evaluation_cases(cases: Sequence[Mapping[str, Any]]) -> None:
+    """Validate the human-reviewed evaluation contract without loading a model."""
+
+    case_ids: set[str] = set()
+    for index, case in enumerate(cases):
+        case_id = case.get("case_id")
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise ValueError(f"case {index} must have a non-empty case_id")
+        if case_id in case_ids:
+            raise ValueError(f"duplicate case_id: {case_id}")
+        case_ids.add(case_id)
+
+        group = case.get("input")
+        if not isinstance(group, Mapping):
+            raise ValueError(f"{case_id} must contain an input object")
+        if group.get("category") not in FILTER_CATEGORIES:
+            raise ValueError(f"{case_id} has an invalid category")
+
+        notifications = group.get("notifications")
+        if not isinstance(notifications, list) or not notifications:
+            raise ValueError(f"{case_id} must contain notifications")
+        for notification in notifications:
+            if not isinstance(notification, Mapping) or not all(
+                isinstance(notification.get(field), str)
+                and notification[field].strip()
+                for field in ("timestamp", "title", "body")
+            ):
+                raise ValueError(f"{case_id} contains an invalid notification")
+
+        _expected_facts(case)
+        forbidden_phrases = _forbidden_phrases(case)
+        _max_summary_lines(case)
+        reference_lines = _reference_summary_lines(case)
+        reference_text = " ".join(reference_lines)
+        if any(
+            not any(alternative in reference_text for alternative in alternatives)
+            for alternatives in _expected_facts(case)
+        ):
+            raise ValueError(f"{case_id} reference omits an expected fact")
+        if any(phrase in reference_text for phrase in forbidden_phrases):
+            raise ValueError(f"{case_id} reference contains a forbidden phrase")
+
+
+def _render_review_markdown(report: Mapping[str, Any]) -> str:
+    """Render a compact report for a human to compare source and model output."""
+
+    lines = [
+        "# Qwen 브리핑 평가 검토",
+        "",
+        "## 전체 결과",
+        "",
+        f"- 모델: `{report['model']}`",
+        f"- 평가 사례: {report['case_count']}개",
+        f"- 구조화 출력 성공률: {report['structured_output_rate']}",
+        f"- 사례 통과율: {report['case_pass_rate']}",
+        f"- 사실 정보 포함률: {report['fact_coverage']}",
+        "",
+        "아래 데이터는 모두 합성 사례입니다. 자동 점수만 보지 말고 입력 알림, "
+        "사람 기준 요약, 모델 요약을 직접 비교해 주세요.",
+    ]
+
+    for index, result in enumerate(report["results"], start=1):
+        status = "PASS" if result["passed"] else "FAIL"
+        lines.extend(
+            [
+                "",
+                f"## {index}. {result['case_id']} — {status}",
+                "",
+                f"- 카테고리: {result['category']}",
+                f"- 핵심 사실: {result['fact_hits']}/{result['fact_total']}",
+                f"- 줄 수 제한 통과: {result['line_limit_passed']}",
+                f"- 누락된 핵심 사실: "
+                f"{result['missing_expected_facts'] or '없음'}",
+                f"- 금지 표현 검출: "
+                f"{', '.join(result['forbidden_phrase_hits']) or '없음'}",
+                "",
+                "### 입력 알림",
+                "",
+            ]
+        )
+        for notification in result["notifications"]:
+            lines.append(
+                f"- `{notification['timestamp']}` **{notification['title']}** — "
+                f"{notification['body']}"
+            )
+        lines.extend(["", "### 사람 기준 요약", ""])
+        lines.extend(
+            f"- {line}" for line in result["reference_summary_lines"]
+        )
+        lines.extend(["", "### 모델 요약", ""])
+        if result["summary_lines"]:
+            lines.extend(f"- {line}" for line in result["summary_lines"])
+        else:
+            lines.append(f"- 오류: {result['error']}")
+
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
@@ -65,9 +179,15 @@ def main() -> None:
         type=Path,
         help="optional path for the JSON evaluation report",
     )
+    parser.add_argument(
+        "--review-output",
+        type=Path,
+        help="optional path for a human-readable Markdown review report",
+    )
     args = parser.parse_args()
 
     cases = load_cases(args.cases)
+    validate_evaluation_cases(cases)
     tokenizer, model = load_model(adapter_path=args.adapter_path)
     structured_count = 0
     fact_hits = 0
@@ -82,6 +202,7 @@ def main() -> None:
             raise ValueError(f"case {index} does not contain an input object")
 
         max_summary_lines = _max_summary_lines(case)
+        reference_summary_lines = _reference_summary_lines(case)
         raw_response, elapsed_seconds = generate_summary(
             tokenizer=tokenizer,
             model=model,
@@ -102,6 +223,13 @@ def main() -> None:
                 any(alternative in combined for alternative in alternatives)
                 for alternatives in expected_facts
             )
+            missing_expected_facts = [
+                list(alternatives)
+                for alternatives in expected_facts
+                if not any(
+                    alternative in combined for alternative in alternatives
+                )
+            ]
             forbidden_hits = tuple(
                 phrase for phrase in forbidden_phrases if phrase in combined
             )
@@ -111,6 +239,9 @@ def main() -> None:
         except ValueError as exc:
             summary_lines = ()
             hits = 0
+            missing_expected_facts = [
+                list(alternatives) for alternatives in expected_facts
+            ]
             forbidden_hits = ()
             line_limit_passed = False
             error = str(exc)
@@ -127,15 +258,26 @@ def main() -> None:
         results.append(
             {
                 "case_id": case.get("case_id", index),
+                "category": group.get("category"),
                 "passed": passed,
                 "structured_output": error is None,
                 "fact_hits": hits,
                 "fact_total": len(expected_facts),
+                "missing_expected_facts": missing_expected_facts,
                 "forbidden_phrase_hits": list(forbidden_hits),
                 "max_summary_lines": max_summary_lines,
                 "line_limit_passed": line_limit_passed,
                 "latency_seconds": round(elapsed_seconds, 2),
                 "summary_lines": list(summary_lines),
+                "reference_summary_lines": list(reference_summary_lines),
+                "notifications": [
+                    {
+                        "timestamp": notification.get("timestamp"),
+                        "title": notification.get("title"),
+                        "body": notification.get("body"),
+                    }
+                    for notification in group.get("notifications", [])
+                ],
                 "error": error,
                 "raw_response": raw_response,
             }
@@ -159,6 +301,12 @@ def main() -> None:
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(serialized_report + "\n", encoding="utf-8")
+    if args.review_output is not None:
+        args.review_output.parent.mkdir(parents=True, exist_ok=True)
+        args.review_output.write_text(
+            _render_review_markdown(report),
+            encoding="utf-8",
+        )
     print(serialized_report)
 
 
