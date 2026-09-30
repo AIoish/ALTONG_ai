@@ -1,2 +1,4 @@
 pydantic
 transformers
+accelerate
+peft
