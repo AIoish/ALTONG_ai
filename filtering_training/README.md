@@ -318,3 +318,89 @@ so this is not perfect prediction of all output fields. Mean generation time was
 7.89 seconds/case. The adapter is a promising development candidate, pending
 untouched evaluation, label review, and latency work. No default model switch,
 training beyond 500 steps, commit, or push was performed.
+
+## Frozen 100-case candidate evaluation
+
+The new synthetic evaluation set is stored locally at
+`outputs/independent_eval_100/notifications.jsonl`. It contains 100 separately
+authored alerts, with gold labels fixed before inspecting model predictions.
+All eight categories have 12 or 13 cases: 27 urgent, 37 policy PASS, 63 BLOCK.
+It includes empty contexts, weak context relevance, advertising that uses urgent
+wording, and both actionable and resolved security events. IDs and normalized
+alert text are checked against the 5,000-row expansion, previous 24-case
+development set, and tracked samples. Labels are provisional author labels;
+independent human review has not been performed. Non-overlap does not prove
+independence from training styles.
+
+Evaluate sequentially on the local GPU using the frozen manifest:
+
+```powershell
+python -m filtering_training.evaluate --dataset filtering_training/outputs/independent_eval_100/notifications.jsonl --prepared-dir filtering_training/outputs/independent_eval_100/prepared --model Qwen/Qwen3-1.7B --adapter filtering_training/outputs/lora-rapid-qwen3-1_7b-500/adapter --output filtering_training/outputs/independent_eval_100/qwen1_7b.json --examples-output filtering_training/outputs/independent_eval_100/qwen1_7b_predictions.json --show-examples 100
+python -m filtering_training.evaluate --dataset filtering_training/outputs/independent_eval_100/notifications.jsonl --prepared-dir filtering_training/outputs/independent_eval_100/prepared --model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit --adapter filtering_training/outputs/qlora-qwen3-4b-500-20260930/adapter --output filtering_training/outputs/independent_eval_100/qwen4b.json --examples-output filtering_training/outputs/independent_eval_100/qwen4b_predictions.json --show-examples 100
+python -m filtering_training.compare_evaluations --dataset filtering_training/outputs/independent_eval_100/notifications.jsonl --run filtering_training/outputs/independent_eval_100/qwen1_7b.json filtering_training/outputs/independent_eval_100/qwen1_7b_predictions.json --run filtering_training/outputs/independent_eval_100/qwen4b.json filtering_training/outputs/independent_eval_100/qwen4b_predictions.json --output filtering_training/outputs/independent_eval_100/comparison.json
+```
+
+The comparison verifies dataset/prompt hashes, complete ordered predictions,
+and recomputed metrics. It records per-category metrics, errors, and urgent
+invalid JSON separately from explicit false blocks. This compares candidate
+pipelines, not model size alone: training corpora, LoRA targets, learning rates
+and precision differ. Keep these cases out of training. Once their results
+inform changes, treat them as development data and reserve new final cases.
+
+To verify the production-style JSON contract without a gold label, use a local
+file containing `{ "notification": {...}, "context": {...} }`. Both snake_case
+and the C# property aliases accepted by the schema are supported; recent
+processes may contain at most three entries. Run, for example:
+
+```powershell
+python -m filtering_training.infer_sample --input-json filtering_training/outputs/independent_eval_100/demo_input_001.json --model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit --adapter filtering_training/outputs/qlora-qwen3-4b-500-20260930/adapter
+```
+
+This command loads the model per invocation and prints the validated four label
+fields plus the computed `is_passed` policy decision. It is a local contract
+probe, not an optimized persistent serving process or a Windows-client
+integration.
+
+Observed frozen 100-case comparison: 1.7B LoRA 86/100 policy and 73/100 exact
+category at 3.21 s mean generation; 4B NF4 QLoRA 94/100 policy and 85/100
+exact category at 7.70 s mean generation. The 4B candidate blocked 2/27
+urgent cases and passed 2/63 gold BLOCK cases. It remains a candidate rather
+than a default-model switch. Review disputed author labels and check a fresh
+unseen set after tuning. Actual three input/output pairs are recorded in
+`docs/filtering-experiment-log.md`.
+
+For a long-running demo, use `python -m filtering_training.infer_sample --stream
+--model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit
+--adapter filtering_training/outputs/qlora-qwen3-4b-500-20260930/adapter`.
+Send one notification/context JSON object per stdin line. The process loads the
+model once and flushes one result JSON line per valid input line. Invalid input
+or invalid model output produces a compact `error` JSON line and does not stop
+later requests. The client should treat such errors as failed decisions.
+Three actual local inputs yielded identical outputs in single-call and stream
+modes. Stream mode took 37.06 seconds end-to-end for all three, including one
+model load; this tiny benchmark is not a per-alert latency estimate. Across the
+frozen 100 cases the 4B generation mean was 7.70 seconds, p95 9.76 seconds,
+excluding tokenization and loading. Persistent loading removes repeated startup
+work, but the GPU generation cost remains. Further latency work is needed.
+
+## Continued-adapter experiment
+
+The optional `--init-adapter` training flag loads a saved QLoRA adapter as
+trainable weights into a new run directory. It checks the source run's model,
+dataset hash, sequence length and LoRA target modules before loading. This
+starts a fresh optimizer and schedule; it does not resume Trainer optimizer
+state. Keep `--qlora` and the same base model/targets when using it.
+
+A local 250-step continuation from the 4B 500-step adapter at learning rate
+0.00002 lowered 702-row validation loss to 0.2465, but the inspected 100-case
+policy score fell from 94/100 to 92/100. Category accuracy stayed 85/100.
+The original 500-step adapter remains the preferred candidate; defaults stay
+unchanged. Detailed changed-case inputs and outputs are in the experiment log.
+
+A second, post-error targeted stress set of 80 local synthetic alerts has been
+checked against prior text and evaluated with both trained candidates. The 4B
+500-step adapter scored 76/80 policy decisions with zero urgent false blocks;
+1.7B scored 65/80. Detailed metrics and three exact input/output examples are
+in the experiment log. Because this set was authored after earlier errors were
+seen, it is not an unbiased final evaluation. Blind review sheets for both
+local evaluation sets are under their respective `outputs/.../review/` folders.

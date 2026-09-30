@@ -183,3 +183,51 @@ Qwen3-4B-Instruct-2507 사전 NF4 배포본을 로컬 GPU에서 기존 개발 24
 측정 및 최적화다. 필요할 때 검증 데이터를 기준으로 추가 학습량을 비교한다.
 500스텝 초과 학습과 전체 1회 학습은 아직 하지 않았고 기본 모델 설정도 유지했다.
 입력·출력 예시 3개와 재로딩 시험 3개를 실험 기록에 남겼다. 커밋·푸시는 하지 않았다.
+
+## Frozen 100-case candidate evaluation and follow-up (2026-09-30)
+
+A new local, Git-ignored 100-case Korean synthetic evaluation set was written
+before inspecting predictions. Its alert IDs and text do not duplicate the
+5,000-row training candidate set, 24-case development set, or tracked samples.
+It contains 12-13 cases per category, 27 urgent, 37 PASS and 63 BLOCK labels.
+Gold labels are author-provisional and require another person's review.
+
+The 1.7B LoRA candidate achieved 86/100 policy decisions, 73/100 exact
+categories, and 3.21 s mean generation. The 4B NF4 QLoRA candidate achieved
+94/100 policy decisions, 85/100 exact categories, and 7.70 s mean generation.
+The 4B candidate still blocked 2/27 urgent cases, both imminent meetings.
+Different datasets, model versions, LoRA targets and precision prevent a
+model-size-only conclusion. Model defaults have not changed.
+
+Next, review disputed gold labels and add fresh unseen examples for the six
+remaining policy-error types. Generate analogous training examples without
+copying the evaluation cases, choose any further QLoRA duration using the
+training validation split, and reserve a second unseen set for the final check.
+The inspected 100 cases are now development evidence, never training rows.
+For the demo, the CLI now accepts a notification/context JSON file without a
+gold label and a saved adapter. Three local probes worked, but end-to-end client
+integration and response-time optimization remain. Benchmark model loading and
+per-alert latency separately before changing the deployed candidate.
+
+## Continued training decision (2026-09-30)
+
+A separate 250-step QLoRA continuation from the original 4B adapter used the
+same dataset, lower learning rate and fresh optimizer. Validation loss fell to
+0.2465, but the inspected 100-case policy result regressed from 94/100 to
+92/100. Preserve the original 500-step adapter as the development candidate.
+Do not treat a lower validation loss as proof of better filtering. Further
+training should follow label review, targeted new synthetic examples, and a
+fresh unseen evaluation set. The inspected 100 cases remain excluded from
+training, and the model default is unchanged.
+
+## Additional synthetic stress check (2026-09-30)
+
+A fresh 80-case, 10-per-category synthetic stress set was authored after the
+first 100-case errors were known. It has no exact alert-text overlap with the
+training candidates or earlier evaluation sets. On it, the original 4B 500-step
+adapter made 76/80 policy decisions correctly and missed no urgent case,
+while the 1.7B adapter made 65/80 policy decisions correctly. The 4B still
+made false passes. This targeted result strengthens the 4B candidate comparison
+but cannot replace independently reviewed real-world evaluation. Both sets
+remain excluded from training. The original 4B adapter and default setting
+remain unchanged; use the blind review sheets before another data revision.
