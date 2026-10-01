@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import unittest
 
@@ -17,12 +18,12 @@ class PrepareQwenDatasetTests(unittest.TestCase):
             set(FILTER_CATEGORIES),
         )
 
-    def test_default_scale_can_produce_200_train_and_40_validation_cases(self) -> None:
+    def test_default_scale_can_produce_240_train_and_48_validation_cases(self) -> None:
         train_records = generate_records("train", 20)
         validation_records = generate_records("validation", 4)
 
-        self.assertEqual(len(train_records), 200)
-        self.assertEqual(len(validation_records), 40)
+        self.assertEqual(len(train_records), 240)
+        self.assertEqual(len(validation_records), 48)
         self.assertTrue(
             {record["case_id"] for record in train_records}.isdisjoint(
                 record["case_id"] for record in validation_records
@@ -39,6 +40,45 @@ class PrepareQwenDatasetTests(unittest.TestCase):
             record["target"],
         )
         self.assertNotIn("synthetic_train", messages[1]["content"])
+
+    def test_fragmented_chat_scenarios_use_adjacent_ids_and_timestamps(self) -> None:
+        fragmented_scenarios = {
+            scenario.name: scenario
+            for scenario in SCENARIOS
+            if scenario.name.startswith("fragmented_")
+        }
+
+        self.assertEqual(
+            set(fragmented_scenarios),
+            {"fragmented_schedule_chat", "fragmented_task_chat"},
+        )
+        for scenario in fragmented_scenarios.values():
+            record = build_record(scenario, "train", 0)
+            group = record["input"]
+            notifications = group["notifications"]
+
+            self.assertGreaterEqual(len(notifications), 4)
+            self.assertTrue(group["app_name"])
+            self.assertTrue(group["sender"])
+            self.assertEqual(
+                {notification["title"] for notification in notifications},
+                {group["sender"]},
+            )
+            self.assertEqual(
+                [notification["id"].rsplit("_", 1)[-1] for notification in notifications],
+                [str(index) for index in range(1, len(notifications) + 1)],
+            )
+
+            timestamps = [
+                datetime.fromisoformat(notification["timestamp"].replace("Z", "+00:00"))
+                for notification in notifications
+            ]
+            self.assertTrue(
+                all(
+                    (later - earlier).total_seconds() == 60
+                    for earlier, later in zip(timestamps, timestamps[1:])
+                )
+            )
 
     def test_validation_uses_held_out_variant(self) -> None:
         scenario = SCENARIOS[0]

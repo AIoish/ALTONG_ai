@@ -127,6 +127,7 @@ class SessionBriefingService:
             groups=tuple(groups),
             todo_candidates=candidates.todos,
             calendar_candidates=candidates.calendar,
+            schedule_summaries=candidates.schedules,
         )
 
     def build_json(self, **kwargs: Any) -> str:

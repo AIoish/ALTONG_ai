@@ -35,10 +35,11 @@ python -m briefing_training.smoke_test_model --case-index 1
 python -m briefing_training.evaluate
 ```
 
-The fixed evaluation set contains 20 synthetic cases across all eight official
-categories. Eight original regression cases are retained, and twelve diverse
+The fixed evaluation set contains 22 synthetic cases across all eight official
+categories. Eight original regression cases are retained, twelve diverse
 cases cover in-progress incidents, review feedback, completed security actions,
-rescheduling, changed delivery locations, promotions, and corrected notices.
+rescheduling, changed delivery locations, promotions, and corrected notices,
+and two cases cover fragmented same-sender chat messages.
 
 The evaluator reports structured JSON compliance, expected-fact coverage,
 superseded-state violations, per-case pass rate, and average generation latency.
@@ -70,12 +71,15 @@ templates:
 python -m briefing_training.prepare_dataset
 ```
 
-The default command writes 200 training cases to `data/train_cases.jsonl` and
-40 validation cases to `data/validation_cases.jsonl`. The fixed 20-case
+The default command writes 240 training cases to `data/train_cases.jsonl` and
+48 validation cases to `data/validation_cases.jsonl`. The fixed 22-case
 `evaluation_cases.jsonl` file remains separate and must not be used for
 fine-tuning. Validation cases use held-out entities and November dates, while
 training cases use October dates. All eight official filter categories are
-represented, and no real notifications or personal data are included.
+represented, and no real notifications or personal data are included. The
+fragmented-chat scenarios use four sequential notification IDs at one-minute
+intervals so that separate short messages contribute different facts to one
+summary.
 
 Validate the generated fine-tuning records without loading a model:
 

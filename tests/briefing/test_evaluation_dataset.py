@@ -1,18 +1,20 @@
 from collections import Counter
+from datetime import datetime
 import unittest
 
 from briefing_training.evaluate import (
     _render_review_markdown,
     validate_evaluation_cases,
 )
+from briefing_training.prepare_dataset import generate_records
 from briefing_training.smoke_test_model import load_cases
 from src.briefing.schema import FILTER_CATEGORIES
 
 
 EXPECTED_CATEGORY_COUNTS = {
     "긴급 업무": 3,
-    "일반 업무": 3,
-    "일정/회의": 3,
+    "일반 업무": 4,
+    "일정/회의": 4,
     "시스템/보안": 3,
     "개인 중요": 2,
     "개인 일반": 2,
@@ -22,12 +24,12 @@ EXPECTED_CATEGORY_COUNTS = {
 
 
 class EvaluationDatasetTests(unittest.TestCase):
-    def test_default_evaluation_set_has_twenty_reviewed_cases(self) -> None:
+    def test_default_evaluation_set_has_twenty_two_reviewed_cases(self) -> None:
         cases = load_cases()
 
         validate_evaluation_cases(cases)
 
-        self.assertEqual(len(cases), 20)
+        self.assertEqual(len(cases), 22)
         self.assertEqual(
             Counter(case["input"]["category"] for case in cases),
             EXPECTED_CATEGORY_COUNTS,
@@ -48,6 +50,63 @@ class EvaluationDatasetTests(unittest.TestCase):
                 len(case["reference_summary_lines"]),
                 case["max_summary_lines"],
             )
+
+    def test_fragmented_chat_cases_have_close_sequential_notifications(self) -> None:
+        cases = {
+            case["case_id"]: case
+            for case in load_cases()
+            if case["case_id"].startswith("fragmented_")
+        }
+
+        self.assertEqual(
+            set(cases),
+            {"fragmented_schedule_chat", "fragmented_task_chat"},
+        )
+        for case in cases.values():
+            group = case["input"]
+            notifications = group["notifications"]
+
+            self.assertGreaterEqual(len(notifications), 4)
+            self.assertTrue(group["app_name"])
+            self.assertTrue(group["sender"])
+            self.assertEqual(
+                len({notification["title"] for notification in notifications}),
+                1,
+            )
+            sequence_numbers = [
+                int(notification["id"].rsplit("_", 1)[-1])
+                for notification in notifications
+            ]
+            self.assertEqual(
+                sequence_numbers,
+                list(range(sequence_numbers[0], sequence_numbers[0] + len(notifications))),
+            )
+
+            timestamps = [
+                datetime.fromisoformat(notification["timestamp"].replace("Z", "+00:00"))
+                for notification in notifications
+            ]
+            self.assertTrue(
+                all(
+                    (later - earlier).total_seconds() == 60
+                    for earlier, later in zip(timestamps, timestamps[1:])
+                )
+            )
+
+    def test_fragmented_evaluation_messages_are_held_out_from_training(self) -> None:
+        train_bodies = {
+            notification["body"]
+            for record in generate_records("train", 20)
+            for notification in record["input"]["notifications"]
+        }
+        evaluation_bodies = {
+            notification["body"]
+            for case in load_cases()
+            if case["case_id"].startswith("fragmented_")
+            for notification in case["input"]["notifications"]
+        }
+
+        self.assertTrue(train_bodies.isdisjoint(evaluation_bodies))
 
     def test_review_report_shows_source_reference_and_model_output(self) -> None:
         report = {

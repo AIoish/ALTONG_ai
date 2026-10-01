@@ -139,7 +139,7 @@ class BriefingPipelineTests(unittest.TestCase):
         self.assertEqual(briefing["duplicate_count"], 1)
         self.assertEqual(briefing["groups"][0]["notification_ids"], ["n1"])
 
-    def test_grouping_uses_app_sender_hour_and_text(self) -> None:
+    def test_grouping_uses_app_sender_time_span_and_text(self) -> None:
         notifications = [
             notification("n1"),
             notification(
@@ -171,6 +171,245 @@ class BriefingPipelineTests(unittest.TestCase):
         self.assertIn({"n4"}, grouped_ids)
         self.assertIn({"n5"}, grouped_ids)
         self.assertEqual(briefing["group_count"], 4)
+
+    def test_adjacent_sequence_ids_group_short_chat_fragments_across_hours(self) -> None:
+        notifications = [
+            notification(
+                "chat_001",
+                app="KakaoTalk",
+                sender="가상 팀원",
+                title="첫말",
+                body="내일 보자.",
+                timestamp="2026-09-13T18:59:00Z",
+            ),
+            notification(
+                "chat_002",
+                app="KakaoTalk",
+                sender="가상 팀원",
+                title="둘째말",
+                body="오후 세 시고.",
+                timestamp="2026-09-13T19:01:00Z",
+            ),
+            notification(
+                "chat_003",
+                app="KakaoTalk",
+                sender="가상 팀원",
+                title="마지막말",
+                body="B강의실로 와.",
+                timestamp="2026-09-13T19:03:00Z",
+            ),
+        ]
+
+        briefing = self.service.build(
+            session_id="session_fragmented_chat",
+            notifications=notifications,
+            filter_results=[filter_result(item["id"]) for item in notifications],
+            generated_at=self.generated_at,
+        ).to_dict()
+
+        self.assertEqual(briefing["group_count"], 1)
+        self.assertEqual(
+            briefing["groups"][0]["notification_ids"],
+            ["chat_001", "chat_002", "chat_003"],
+        )
+
+    def test_shared_tokens_group_across_hour_boundary_within_thirty_minutes(self) -> None:
+        notifications = [
+            notification(
+                "notice_010",
+                title="프로젝트 공지",
+                body="프로젝트 공지를 올립니다.",
+                timestamp="2026-09-13T18:59:00Z",
+            ),
+            notification(
+                "notice_020",
+                title="프로젝트 자료",
+                body="프로젝트 자료를 공유합니다.",
+                timestamp="2026-09-13T19:05:00Z",
+            ),
+        ]
+
+        briefing = self.service.build(
+            session_id="session_cross_hour_tokens",
+            notifications=notifications,
+            filter_results=[filter_result(item["id"]) for item in notifications],
+            generated_at=self.generated_at,
+        ).to_dict()
+
+        self.assertEqual(briefing["group_count"], 1)
+
+    def test_shared_tokens_do_not_group_beyond_thirty_minute_span(self) -> None:
+        notifications = [
+            notification(
+                "notice_010",
+                title="프로젝트 공지",
+                body="프로젝트 공지를 올립니다.",
+                timestamp="2026-09-13T18:00:00Z",
+            ),
+            notification(
+                "notice_020",
+                title="프로젝트 자료",
+                body="프로젝트 자료를 공유합니다.",
+                timestamp="2026-09-13T18:31:00Z",
+            ),
+        ]
+
+        briefing = self.service.build(
+            session_id="session_long_span",
+            notifications=notifications,
+            filter_results=[filter_result(item["id"]) for item in notifications],
+            generated_at=self.generated_at,
+        ).to_dict()
+
+        self.assertEqual(briefing["group_count"], 2)
+
+    def test_sequence_grouping_rejects_unreliable_or_unrelated_ids(self) -> None:
+        cases = {
+            "non_adjacent": (
+                notification("chat_001", title="첫번째", body="내일 보자."),
+                notification(
+                    "chat_003",
+                    title="세번째",
+                    body="오후에 와.",
+                    timestamp="2026-09-13T18:07:00Z",
+                ),
+            ),
+            "different_prefix": (
+                notification("chat_a_001", title="첫번째", body="내일 보자."),
+                notification(
+                    "chat_b_002",
+                    title="둘째",
+                    body="오후에 와.",
+                    timestamp="2026-09-13T18:07:00Z",
+                ),
+            ),
+            "uuid": (
+                notification(
+                    "550e8400-e29b-41d4-a716-446655440001",
+                    title="첫번째",
+                    body="내일 보자.",
+                ),
+                notification(
+                    "550e8400-e29b-41d4-a716-446655440002",
+                    title="둘째",
+                    body="오후에 와.",
+                    timestamp="2026-09-13T18:07:00Z",
+                ),
+            ),
+        }
+
+        for case_name, notifications in cases.items():
+            with self.subTest(case=case_name):
+                briefing = self.service.build(
+                    session_id=f"session_{case_name}",
+                    notifications=list(notifications),
+                    filter_results=[
+                        filter_result(item["id"]) for item in notifications
+                    ],
+                    generated_at=self.generated_at,
+                ).to_dict()
+                self.assertEqual(briefing["group_count"], 2)
+
+    def test_sequence_grouping_requires_close_time_and_same_sender(self) -> None:
+        cases = {
+            "time_gap": (
+                notification("chat_001", title="첫번째", body="내일 보자."),
+                notification(
+                    "chat_002",
+                    title="둘째",
+                    body="오후에 와.",
+                    timestamp="2026-09-13T18:11:00Z",
+                ),
+            ),
+            "different_sender": (
+                notification("chat_001", title="첫번째", body="내일 보자."),
+                notification(
+                    "chat_002",
+                    sender="다른 가상 사용자",
+                    title="둘째",
+                    body="오후에 와.",
+                    timestamp="2026-09-13T18:07:00Z",
+                ),
+            ),
+            "different_app": (
+                notification("chat_001", title="첫번째", body="내일 보자."),
+                notification(
+                    "chat_002",
+                    app="KakaoTalk",
+                    title="둘째",
+                    body="오후에 와.",
+                    timestamp="2026-09-13T18:07:00Z",
+                ),
+            ),
+        }
+
+        for case_name, notifications in cases.items():
+            with self.subTest(case=case_name):
+                briefing = self.service.build(
+                    session_id=f"session_{case_name}",
+                    notifications=list(notifications),
+                    filter_results=[
+                        filter_result(item["id"]) for item in notifications
+                    ],
+                    generated_at=self.generated_at,
+                ).to_dict()
+                self.assertEqual(briefing["group_count"], 2)
+
+    def test_sequence_grouping_is_disabled_for_sender_fallback_to_app(self) -> None:
+        notifications = [
+            notification(
+                "chat_001",
+                app="KakaoTalk",
+                sender="KakaoTalk",
+                title="첫번째",
+                body="내일 보자.",
+            ),
+            notification(
+                "chat_002",
+                app="KakaoTalk",
+                sender="KakaoTalk",
+                title="둘째",
+                body="오후에 와.",
+                timestamp="2026-09-13T18:07:00Z",
+            ),
+        ]
+
+        briefing = self.service.build(
+            session_id="session_sender_fallback",
+            notifications=notifications,
+            filter_results=[filter_result(item["id"]) for item in notifications],
+            generated_at=self.generated_at,
+        ).to_dict()
+
+        self.assertEqual(briefing["group_count"], 2)
+
+    def test_sequence_ids_do_not_merge_unrelated_calendar_app_events(self) -> None:
+        notifications = [
+            notification(
+                "noti_001",
+                app="Calendar",
+                sender="일정 알림봇",
+                title="치과 예약",
+                body="내일 오전 10시 치과 예약입니다.",
+            ),
+            notification(
+                "noti_002",
+                app="Calendar",
+                sender="일정 알림봇",
+                title="프로젝트 회의",
+                body="내일 오후 3시 프로젝트 회의입니다.",
+                timestamp="2026-09-13T18:07:00Z",
+            ),
+        ]
+
+        briefing = self.service.build(
+            session_id="session_unrelated_calendar_events",
+            notifications=notifications,
+            filter_results=[filter_result(item["id"]) for item in notifications],
+            generated_at=self.generated_at,
+        ).to_dict()
+
+        self.assertEqual(briefing["group_count"], 2)
 
     def test_category_is_decided_after_grouping_and_latest_breaks_tie(self) -> None:
         notifications = [

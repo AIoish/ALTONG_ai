@@ -233,6 +233,128 @@ SCENARIOS = (
         urgency=(3, 4, 3.5),
         relevance=(5, 5, 5.0),
     ),
+    Scenario(
+        name="fragmented_schedule_chat",
+        category="일정/회의",
+        variants=(
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 스터디장",
+                "subject": "AI 스터디",
+                "who": "프로젝트 팀원들",
+                "place": "B강의실",
+                "reason": "발표 순서 조정",
+                "method": "대면",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 팀장",
+                "subject": "기획 회의",
+                "who": "기획팀과 개발팀",
+                "place": "회의실 2",
+                "reason": "요구사항 확정",
+                "method": "대면",
+            },
+            {
+                "app": "Slack",
+                "sender": "가상 프로젝트 리더",
+                "subject": "진행 상황 공유회",
+                "who": "프로젝트 참여자들",
+                "place": "온라인 회의실",
+                "reason": "중간 결과 공유",
+                "method": "화상",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 조교",
+                "subject": "과제 질의응답",
+                "who": "수강생들",
+                "place": "공학관 301호",
+                "reason": "제출 전 질문 정리",
+                "method": "대면",
+            },
+            {
+                "app": "Teams",
+                "sender": "가상 운영자",
+                "subject": "서비스 회고",
+                "who": "운영팀 전원",
+                "place": "온라인 회의실",
+                "reason": "장애 대응 과정 점검",
+                "method": "화상",
+            },
+        ),
+        notifications=(
+            NotificationTemplate(
+                "{sender}", "참석자는 {who}이고 {subject}를 진행합니다."
+            ),
+            NotificationTemplate("{sender}", "{date} {time}에 만나요."),
+            NotificationTemplate("{sender}", "장소는 {place}입니다."),
+            NotificationTemplate(
+                "{sender}", "진행 이유는 {reason}이고 {method} 방식입니다."
+            ),
+        ),
+        target_lines=(
+            "{subject} 일정은 {date} {time} {place}이며 참석자는 {who}입니다.",
+            "진행 이유는 {reason}이고 {method} 방식입니다.",
+        ),
+        max_summary_lines=2,
+        urgency=(2, 4, 3.0),
+        relevance=(4, 5, 4.5),
+    ),
+    Scenario(
+        name="fragmented_task_chat",
+        category="일반 업무",
+        variants=(
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 팀장",
+                "subject": "발표 자료 수정",
+                "artifact": "수정본과 검토 의견",
+                "place": "팀 공유 폴더",
+            },
+            {
+                "app": "Slack",
+                "sender": "가상 리뷰어",
+                "subject": "결제 모듈 코드 보완",
+                "artifact": "PR 링크와 테스트 결과",
+                "place": "개발 채널",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 동료",
+                "subject": "회의록 정리",
+                "artifact": "회의록과 결정 사항",
+                "place": "팀 드라이브",
+            },
+            {
+                "app": "Teams",
+                "sender": "가상 기획자",
+                "subject": "요구사항 문서 갱신",
+                "artifact": "변경 내역과 최신 문서",
+                "place": "프로젝트 보드",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 멘토",
+                "subject": "모델 평가 결과 정리",
+                "artifact": "평가 표와 실패 사례",
+                "place": "공유 문서함",
+            },
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 부탁드려요."),
+            NotificationTemplate("{sender}", "{date} {time}까지예요."),
+            NotificationTemplate("{sender}", "{artifact}도 같이 올려 주세요."),
+            NotificationTemplate("{sender}", "{place}에 올리면 됩니다."),
+        ),
+        target_lines=(
+            "{subject} 작업 마감은 {date} {time}입니다.",
+            "필요 자료는 {artifact}이며 업로드 위치는 {place}입니다.",
+        ),
+        max_summary_lines=2,
+        urgency=(2, 4, 3.0),
+        relevance=(4, 5, 4.5),
+    ),
 )
 
 
@@ -276,7 +398,7 @@ def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
         notifications.append(
             {
                 "id": f"synthetic_{split}_{scenario.name}_{index:03d}_{step + 1}",
-                "timestamp": f"2026-{month:02d}-{day:02d}T09:{step * 10:02d}:00Z",
+                "timestamp": f"2026-{month:02d}-{day:02d}T08:{step:02d}:00Z",
                 "title": template.title.format(**values),
                 "body": template.body.format(**values),
             }

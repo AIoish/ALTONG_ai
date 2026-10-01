@@ -74,6 +74,8 @@ class QwenSummaryBaselineTests(unittest.TestCase):
         self.assertIn("반드시 { 문자로 시작", actual_prompt)
         self.assertIn("마지막 항목이 가장 최신", actual_prompt)
         self.assertIn("서로 다른 정보를 보태면", actual_prompt)
+        self.assertIn("연속된 짧은 메시지", actual_prompt)
+        self.assertIn("누가, 언제, 어디서, 무엇을, 왜, 어떻게", actual_prompt)
 
     def test_parser_accepts_one_to_three_summary_lines(self) -> None:
         parsed = parse_summary_response(

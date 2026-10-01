@@ -7,7 +7,7 @@ They can later be replaced by adapters around the models owned by ``common``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -217,6 +217,50 @@ class TodoCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class ScheduleDetails:
+    """Source-grounded six-question fields for a schedule notification."""
+
+    who: str | None = None
+    when: str | None = None
+    where: str | None = None
+    what: str | None = None
+    why: str | None = None
+    how: str | None = None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "who": self.who,
+            "when": self.when,
+            "where": self.where,
+            "what": self.what,
+            "why": self.why,
+            "how": self.how,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleSummary:
+    """A schedule report that keeps the same six fields even when incomplete."""
+
+    summary_id: str
+    title: str
+    status: str
+    schedule_details: ScheduleDetails
+    source_notification_ids: tuple[str, ...]
+    source_group_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "summary_id": self.summary_id,
+            "title": self.title,
+            "status": self.status,
+            "schedule_details": self.schedule_details.to_dict(),
+            "source_notification_ids": list(self.source_notification_ids),
+            "source_group_ids": list(self.source_group_ids),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CalendarCandidate:
     """Temporary briefing-local candidate for a calendar event."""
 
@@ -227,6 +271,8 @@ class CalendarCandidate:
     source_notification_ids: tuple[str, ...]
     source_group_ids: tuple[str, ...]
     matched_cues: tuple[str, ...]
+    status: str = "scheduled"
+    schedule_details: ScheduleDetails = field(default_factory=ScheduleDetails)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +280,8 @@ class CalendarCandidate:
             "title": self.title,
             "scheduled_at": format_timestamp(self.scheduled_at),
             "is_all_day": self.is_all_day,
+            "status": self.status,
+            "schedule_details": self.schedule_details.to_dict(),
             "source_notification_ids": list(self.source_notification_ids),
             "source_group_ids": list(self.source_group_ids),
             "matched_cues": list(self.matched_cues),
@@ -250,6 +298,7 @@ class SessionBriefing:
     groups: tuple[BriefingGroup, ...]
     todo_candidates: tuple[TodoCandidate, ...] = ()
     calendar_candidates: tuple[CalendarCandidate, ...] = ()
+    schedule_summaries: tuple[ScheduleSummary, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -265,5 +314,9 @@ class SessionBriefing:
             "calendar_candidate_count": len(self.calendar_candidates),
             "calendar_candidates": [
                 candidate.to_dict() for candidate in self.calendar_candidates
+            ],
+            "schedule_summary_count": len(self.schedule_summaries),
+            "schedule_summaries": [
+                summary.to_dict() for summary in self.schedule_summaries
             ],
         }

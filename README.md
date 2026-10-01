@@ -57,6 +57,42 @@ python -m briefing_training.smoke_test_runtime_provider `
   --adapter-path "C:\path\to\briefing-qwen-lora"
 ```
 
+## Conversation grouping and schedule output
+
+The briefing pipeline groups same-app, same-sender notification fragments when
+their recognized sequence IDs are adjacent and they arrive within five
+minutes. Sequence proximity is only a supporting signal: unrelated senders,
+UUID-style IDs, non-adjacent IDs, and missing-sender fallbacks are not merged by
+ID alone. Shared-text grouping is limited to a 30-minute group span.
+
+Calendar candidates keep the existing non-null `scheduled_at` contract. They
+additionally expose `status` (`scheduled`, `changed`, or `cancelled`) and the
+same six-question details. Every schedule-related group, including one without
+a parseable time, is also returned in `schedule_summaries`:
+
+```json
+{
+  "schedule_summaries": [
+    {
+      "status": "scheduled",
+      "schedule_details": {
+        "who": "캡스톤 참가자들",
+        "when": "2026-10-12T19:00:00Z",
+        "where": "창의관 402호",
+        "what": "졸업 작품 중간 점검",
+        "why": "시연 동선 확인",
+        "how": "오프라인"
+      }
+    }
+  ]
+}
+```
+
+Fields that are not stated in the source remain `null`; the pipeline does not
+guess missing schedule details. The synthetic raw-notification contract used by
+the runtime smoke test is available at
+`data/sample/briefing/raw_notifications.json`.
+
 ## Tests
 
 Run the repository test suite from the project root:
