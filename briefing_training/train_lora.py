@@ -81,10 +81,27 @@ def to_prompt_completion(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_dataset(records: Sequence[Mapping[str, Any]]):
+def render_prompt_completion(
+    record: Mapping[str, Any], tokenizer: Any
+) -> dict[str, str]:
+    example = to_prompt_completion(record)
+    prompt = tokenizer.apply_chat_template(
+        example["prompt"],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    completion = example["completion"][0]["content"]
+    if tokenizer.eos_token:
+        completion = f"{completion}{tokenizer.eos_token}"
+    return {"prompt": prompt, "completion": completion}
+
+
+def build_dataset(records: Sequence[Mapping[str, Any]], tokenizer: Any):
     from datasets import Dataset
 
-    return Dataset.from_list([to_prompt_completion(record) for record in records])
+    return Dataset.from_list(
+        [render_prompt_completion(record, tokenizer) for record in records]
+    )
 
 
 def train(
@@ -106,14 +123,6 @@ def train(
     if not torch.cuda.is_available():
         raise RuntimeError("QLoRA training requires a CUDA GPU; run this command in Colab")
 
-    train_records = load_records(train_path, expected_split="train")
-    validation_records = load_records(
-        validation_path, expected_split="validation"
-    )
-    validate_split_separation(train_records, validation_records)
-    train_dataset = build_dataset(train_records)
-    validation_dataset = build_dataset(validation_records)
-
     use_bf16 = torch.cuda.is_bf16_supported()
     compute_dtype = torch.bfloat16 if use_bf16 else torch.float16
     quantization_config = BitsAndBytesConfig(
@@ -133,6 +142,14 @@ def train(
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
+    train_records = load_records(train_path, expected_split="train")
+    validation_records = load_records(
+        validation_path, expected_split="validation"
+    )
+    validate_split_separation(train_records, validation_records)
+    train_dataset = build_dataset(train_records, tokenizer)
+    validation_dataset = build_dataset(validation_records, tokenizer)
 
     training_config = SFTConfig(
         output_dir=str(output_directory),
