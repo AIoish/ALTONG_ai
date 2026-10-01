@@ -6,30 +6,30 @@ from briefing_training.evaluate import (
     _render_review_markdown,
     validate_evaluation_cases,
 )
-from briefing_training.prepare_dataset import generate_records
+from briefing_training.prepare_dataset import generate_balanced_records, generate_records
 from briefing_training.smoke_test_model import load_cases
 from src.briefing.schema import FILTER_CATEGORIES
 
 
 EXPECTED_CATEGORY_COUNTS = {
-    "긴급 업무": 3,
-    "일반 업무": 4,
-    "일정/회의": 4,
-    "시스템/보안": 3,
-    "개인 중요": 2,
-    "개인 일반": 2,
-    "광고/홍보": 2,
-    "기타": 2,
+    "긴급 업무": 4,
+    "일반 업무": 5,
+    "일정/회의": 5,
+    "시스템/보안": 4,
+    "개인 중요": 3,
+    "개인 일반": 3,
+    "광고/홍보": 3,
+    "기타": 3,
 }
 
 
 class EvaluationDatasetTests(unittest.TestCase):
-    def test_default_evaluation_set_has_twenty_two_reviewed_cases(self) -> None:
+    def test_default_evaluation_set_has_thirty_reviewed_cases(self) -> None:
         cases = load_cases()
 
         validate_evaluation_cases(cases)
 
-        self.assertEqual(len(cases), 22)
+        self.assertEqual(len(cases), 30)
         self.assertEqual(
             Counter(case["input"]["category"] for case in cases),
             EXPECTED_CATEGORY_COUNTS,
@@ -107,6 +107,37 @@ class EvaluationDatasetTests(unittest.TestCase):
         }
 
         self.assertTrue(train_bodies.isdisjoint(evaluation_bodies))
+
+    def test_colloquial_cases_cover_all_categories_and_are_held_out(self) -> None:
+        cases = [
+            case for case in load_cases()
+            if case["case_id"].startswith("colloquial_")
+        ]
+        self.assertEqual(len(cases), 8)
+        self.assertEqual(
+            {case["input"]["category"] for case in cases},
+            set(FILTER_CATEGORIES),
+        )
+
+        train_bodies = {
+            notification["body"]
+            for record in generate_balanced_records("train", 1000)
+            for notification in record["input"]["notifications"]
+        }
+        evaluation_bodies = {
+            notification["body"]
+            for case in cases
+            for notification in case["input"]["notifications"]
+        }
+        self.assertTrue(train_bodies.isdisjoint(evaluation_bodies))
+
+        for case in cases:
+            notifications = case["input"]["notifications"]
+            self.assertGreaterEqual(len(notifications), 3)
+            self.assertEqual(
+                {notification["title"] for notification in notifications},
+                {case["input"]["sender"]},
+            )
 
     def test_review_report_shows_source_reference_and_model_output(self) -> None:
         report = {

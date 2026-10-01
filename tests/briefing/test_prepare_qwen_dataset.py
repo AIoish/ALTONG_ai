@@ -5,7 +5,9 @@ import unittest
 from briefing_training.prepare_dataset import (
     SCENARIOS,
     build_record,
+    generate_balanced_records,
     generate_records,
+    normalized_body_fingerprint,
     training_messages,
 )
 from src.briefing.schema import FILTER_CATEGORIES
@@ -18,17 +20,59 @@ class PrepareQwenDatasetTests(unittest.TestCase):
             set(FILTER_CATEGORIES),
         )
 
-    def test_default_scale_can_produce_240_train_and_48_validation_cases(self) -> None:
-        train_records = generate_records("train", 20)
-        validation_records = generate_records("validation", 4)
+    def test_default_scale_produces_1000_train_and_120_validation_cases(self) -> None:
+        train_records = generate_balanced_records("train", 1000)
+        validation_records = generate_balanced_records("validation", 120)
 
-        self.assertEqual(len(train_records), 240)
-        self.assertEqual(len(validation_records), 48)
+        self.assertEqual(len(train_records), 1000)
+        self.assertEqual(len(validation_records), 120)
+        self.assertEqual(
+            len({normalized_body_fingerprint(record) for record in train_records}),
+            1000,
+        )
+        self.assertEqual(
+            len(
+                {
+                    normalized_body_fingerprint(record)
+                    for record in validation_records
+                }
+            ),
+            120,
+        )
         self.assertTrue(
             {record["case_id"] for record in train_records}.isdisjoint(
                 record["case_id"] for record in validation_records
             )
         )
+
+    def test_expanded_scenarios_balance_all_categories(self) -> None:
+        scenario_counts = {
+            category: sum(
+                scenario.category == category for scenario in SCENARIOS
+            )
+            for category in FILTER_CATEGORIES
+        }
+
+        self.assertEqual(len(SCENARIOS), 32)
+        self.assertEqual(set(scenario_counts.values()), {4})
+
+        records = generate_balanced_records("train", 1000)
+        category_counts = {
+            category: sum(
+                record["input"]["category"] == category for record in records
+            )
+            for category in FILTER_CATEGORIES
+        }
+        self.assertEqual(set(category_counts.values()), {125})
+
+    def test_large_dataset_timestamps_are_valid(self) -> None:
+        records = generate_balanced_records("train", 1000)
+
+        for record in records:
+            for notification in record["input"]["notifications"]:
+                datetime.fromisoformat(
+                    notification["timestamp"].replace("Z", "+00:00")
+                )
 
     def test_training_messages_append_strict_json_answer(self) -> None:
         record = build_record(SCENARIOS[0], "train", 0)
@@ -48,16 +92,27 @@ class PrepareQwenDatasetTests(unittest.TestCase):
             if scenario.name.startswith("fragmented_")
         }
 
+        self.assertEqual(len(fragmented_scenarios), 16)
         self.assertEqual(
-            set(fragmented_scenarios),
-            {"fragmented_schedule_chat", "fragmented_task_chat"},
+            {scenario.category for scenario in fragmented_scenarios.values()},
+            set(FILTER_CATEGORIES),
+        )
+        self.assertEqual(
+            {
+                category: sum(
+                    scenario.category == category
+                    for scenario in fragmented_scenarios.values()
+                )
+                for category in FILTER_CATEGORIES
+            },
+            {category: 2 for category in FILTER_CATEGORIES},
         )
         for scenario in fragmented_scenarios.values():
             record = build_record(scenario, "train", 0)
             group = record["input"]
             notifications = group["notifications"]
 
-            self.assertGreaterEqual(len(notifications), 4)
+            self.assertGreaterEqual(len(notifications), 3)
             self.assertTrue(group["app_name"])
             self.assertTrue(group["sender"])
             self.assertEqual(
