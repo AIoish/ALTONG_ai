@@ -1,27 +1,31 @@
 """Evaluate a base or LoRA filtering model on a fixed prepared split."""
 
+from filtering_training.common.paths import OUTPUTS_ROOT, resolve_existing_path
+
 import argparse
 import hashlib
 import json
+import random
 import time
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
 from sklearn.metrics import f1_score
 
-from filtering_training.datasets.prepare_dataset import DATASET_PATH, OUTPUT_DIR, load_samples
-from src.filtering.policy import should_pass
+from filtering_training.common.dataset import load_samples
+from filtering_training.preparation.prepare_dataset import DATASET_PATH, OUTPUT_DIR
+from src.filtering.policy import POLICY_VERSION, should_pass
 from src.filtering.prompt import SYSTEM_PROMPT, build_messages, parse_model_output
 from src.filtering.schema import FilterLabel, FilteringSample
 
 
 MODEL_NAME = "Qwen/Qwen3-1.7B"
-EVALUATION_DIR = TRAINING_ROOT / "outputs" / "evaluation"
+EVALUATION_DIR = OUTPUTS_ROOT / "runs" / "evaluation"
 MAX_NEW_TOKENS = 192
 
 
 def load_split_samples(dataset: Path, prepared_dir: Path, split: str) -> list[FilteringSample]:
+    dataset = resolve_existing_path(dataset)
+    prepared_dir = resolve_existing_path(prepared_dir)
     manifest = json.loads((prepared_dir / "manifest.json").read_text(encoding="utf-8"))
     if hashlib.sha256(dataset.read_bytes()).hexdigest() != manifest["source_sha256"]:
         raise ValueError("prepared split does not match the current dataset")
@@ -94,13 +98,22 @@ def score_predictions(
 def evaluate(
     dataset: Path, prepared_dir: Path, split: str, model_name: str,
     adapter: Path | None, output: Path, example_count: int = 0,
-    examples_output: Path | None = None, load_in_4bit: bool = False
+    examples_output: Path | None = None, load_in_4bit: bool = False,
+    max_samples: int = 0, predictions_output: Path | None = None,
 ) -> dict:
+    dataset = resolve_existing_path(dataset)
+    prepared_dir = resolve_existing_path(prepared_dir)
+    if adapter is not None:
+        adapter = resolve_existing_path(adapter)
     import torch
     import transformers
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     samples = load_split_samples(dataset, prepared_dir, split)
+    if max_samples < 0:
+        raise ValueError("max_samples must be non-negative")
+    if max_samples and max_samples < len(samples):
+        samples = random.Random(42).sample(samples, max_samples)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     load_kwargs = {"dtype": "auto", "device_map": "auto"}
     if load_in_4bit:
@@ -176,7 +189,10 @@ def evaluate(
         },
         "dataset_sha256": hashlib.sha256(dataset.read_bytes()).hexdigest(),
         "prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+        "policy_version": POLICY_VERSION,
         "split": split,
+        "evaluated_count": len(samples),
+        "sampling_seed": 42 if max_samples else None,
         "generation": {"max_new_tokens": MAX_NEW_TOKENS, "do_sample": False,
                        "enable_thinking": False},
         "environment": {
@@ -202,6 +218,19 @@ def evaluate(
         if examples_output is not None:
             examples_output.parent.mkdir(parents=True, exist_ok=True)
             examples_output.write_text(examples_json, encoding="utf-8")
+    if predictions_output is not None:
+        predictions_output.parent.mkdir(parents=True, exist_ok=True)
+        with predictions_output.open("w", encoding="utf-8") as file:
+            for sample, prediction, response, seconds in zip(samples, predictions, responses, timings):
+                file.write(json.dumps({
+                    "notification_id": sample.notification.id,
+                    "notification": sample.notification.model_dump(mode="json"),
+                    "context": sample.context.model_dump(mode="json"),
+                    "gold": sample.label.model_dump(mode="json"),
+                    "prediction": prediction.model_dump(mode="json") if prediction else None,
+                    "raw_response": response,
+                    "generation_seconds": seconds,
+                }, ensure_ascii=False) + "\n")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
@@ -219,15 +248,22 @@ def main() -> None:
     parser.add_argument("--examples-output", type=Path)
     parser.add_argument("--show-examples", type=int, default=3,
                         help="print this many model JSON outputs (default: 3)")
+    parser.add_argument("--max-samples", type=int, default=0,
+                        help="evaluate N seeded random split samples (0 means all)")
+    parser.add_argument("--predictions-output", type=Path,
+                        help="write one gold and predicted label per evaluated case")
     args = parser.parse_args()
     if args.show_examples < 0:
         parser.error("--show-examples must be non-negative")
+    if args.max_samples < 0:
+        parser.error("--max-samples must be non-negative")
     output = args.output or EVALUATION_DIR / (
         ("adapter" if args.adapter else "base") + f"_{args.split}.json"
     )
     report = evaluate(args.dataset, args.prepared_dir, args.split,
                       args.model, args.adapter, output, args.show_examples,
-                      args.examples_output, args.load_in_4bit)
+                      args.examples_output, args.load_in_4bit,
+                      args.max_samples, args.predictions_output)
     print(json.dumps(report["metrics"], ensure_ascii=False, indent=2))
     print(f"Report: {output}")
 

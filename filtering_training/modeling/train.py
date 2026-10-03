@@ -5,15 +5,16 @@ import hashlib
 import json
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
+from filtering_training.common.paths import OUTPUTS_ROOT, LEGACY_OUTPUTS_ROOT, resolve_existing_path
 
 
-PREPARED_DIR = TRAINING_ROOT / "outputs" / "prepared"
-RUN_DIR = TRAINING_ROOT / "outputs" / "lora-smoke"
+PREPARED_DIR = LEGACY_OUTPUTS_ROOT / "prepared"
+RUN_DIR = OUTPUTS_ROOT / "runs" / "lora-smoke"
 MODEL_NAME = "Qwen/Qwen3-1.7B"
 
 
 def load_training_pairs(path: Path, tokenizer, max_length: int) -> list[dict[str, str]]:
+    path = resolve_existing_path(path)
     pairs = []
     with path.open(encoding="utf-8") as source:
         for line_number, line in enumerate(source, start=1):
@@ -43,6 +44,9 @@ def train(prepared_dir: Path, run_dir: Path, max_steps: int,
           learning_rate: float = 2e-4, save_steps: int = 0, eval_steps: int = 0,
           lora_targets: str = "q_proj,v_proj",
           init_adapter: Path | None = None) -> dict:
+    prepared_dir = resolve_existing_path(prepared_dir)
+    if init_adapter is not None:
+        init_adapter = resolve_existing_path(init_adapter)
     import torch
     import transformers
     import trl

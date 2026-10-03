@@ -5,13 +5,16 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from filtering_training.evaluate import score_predictions
-from filtering_training.datasets.prepare_dataset import load_samples
+from filtering_training.modeling.evaluate import score_predictions
+from filtering_training.common.dataset import load_samples
+from filtering_training.common.paths import resolve_existing_path
 from src.filtering.policy import should_pass
 from src.filtering.prompt import CATEGORIES, parse_model_output
 
 
 def compare(dataset: Path, runs: list[tuple[Path, Path]]) -> dict:
+    dataset = resolve_existing_path(dataset)
+    runs = [(resolve_existing_path(report), resolve_existing_path(predictions)) for report, predictions in runs]
     samples = load_samples(dataset)
     digest = hashlib.sha256(dataset.read_bytes()).hexdigest()
     expected_ids = [sample.notification.id for sample in samples]
