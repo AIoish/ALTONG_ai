@@ -1,10 +1,13 @@
+POLICY_VERSION = "urgency4_or_relevance4_v2"
+
+
 def should_pass(urgency_score: int, relevance_score: int) -> bool:
     """
     Determine whether a notification should be passed immediately.
 
     Policy:
     - urgency >= 4  -> PASS
-    - urgency == 3 and relevance >= 4 -> PASS
+    - relevance >= 4 -> PASS
     - otherwise -> BLOCK
     """
 
@@ -17,7 +20,7 @@ def should_pass(urgency_score: int, relevance_score: int) -> bool:
     if urgency_score >= 4:
         return True
 
-    if urgency_score == 3 and relevance_score >= 4:
+    if relevance_score >= 4:
         return True
 
     return False
