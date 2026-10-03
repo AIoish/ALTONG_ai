@@ -1,20 +1,21 @@
 """Validate an independent synthetic holdout and prepare an evaluation-only manifest."""
 
+from filtering_training.common.paths import TRAINING_ROOT, LEGACY_OUTPUTS_ROOT
+
 import argparse
 import hashlib
 import json
 from collections import Counter
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
-from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
+from filtering_training.common.dataset import load_samples
+from filtering_training.preparation.prepare_dataset import DATASET_PATH
 from src.filtering.prompt import CATEGORIES
 from src.filtering.schema import FilteringSample
 
 
 HOLDOUT_PATH = TRAINING_ROOT / "data" / "evaluation_notifications.jsonl"
-OUTPUT_DIR = TRAINING_ROOT / "outputs" / "holdout"
+OUTPUT_DIR = LEGACY_OUTPUTS_ROOT / "holdout"
 
 
 def notification_key(sample: FilteringSample) -> tuple[str, ...]:

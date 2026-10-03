@@ -3,6 +3,8 @@
 This is deterministic composition, not an LLM translation. Inputs and labels are
 provisional and belong in ignored outputs until review. No private file is read.
 """
+
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
 import argparse
 import hashlib
 import json
@@ -10,14 +12,13 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
-from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
-from filtering_training.datasets.prepare_holdout import HOLDOUT_PATH, notification_key
+from filtering_training.common.dataset import load_samples
+from filtering_training.preparation.prepare_dataset import DATASET_PATH
+from filtering_training.preparation.prepare_holdout import HOLDOUT_PATH, notification_key
 from src.filtering.prompt import CATEGORIES, parse_model_output
 from src.filtering.schema import FilteringSample
 
-OUTPUT_PATH = TRAINING_ROOT / "outputs" / "candidates" / "rapid_korean_3000.jsonl"
+OUTPUT_PATH = LEGACY_OUTPUTS_ROOT / "candidates" / "rapid_korean_3000.jsonl"
 BASE_TIME = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
 POOLS = {

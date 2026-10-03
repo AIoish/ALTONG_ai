@@ -1,5 +1,7 @@
 """Validate and convert filtering samples into reproducible SFT JSONL splits."""
 
+from filtering_training.common.paths import TRAINING_ROOT, LEGACY_OUTPUTS_ROOT, resolve_existing_path
+
 import argparse
 import hashlib
 import json
@@ -7,36 +9,14 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
-from src.filtering.prompt import build_messages, parse_model_output
+from filtering_training.common.dataset import load_samples, to_sft_record
 from src.filtering.schema import FilteringSample
 
 
 DATASET_PATH = TRAINING_ROOT / "data" / "sample_notifications.jsonl"
-OUTPUT_DIR = TRAINING_ROOT / "outputs" / "prepared"
+OUTPUT_DIR = LEGACY_OUTPUTS_ROOT / "prepared"
 
 
-def load_samples(path: Path) -> list[FilteringSample]:
-    samples = []
-    seen_ids = set()
-    with path.open(encoding="utf-8") as source:
-        for line_number, line in enumerate(source, start=1):
-            if not line.strip():
-                continue
-            try:
-                sample = FilteringSample.model_validate_json(line)
-                target = json.dumps(sample.label.model_dump(), ensure_ascii=False)
-                parse_model_output(target)
-            except (ValueError, json.JSONDecodeError) as error:
-                raise ValueError(f"invalid sample at line {line_number}") from error
-            if sample.notification.id in seen_ids:
-                raise ValueError(f"duplicate notification id at line {line_number}")
-            seen_ids.add(sample.notification.id)
-            samples.append(sample)
-    if not samples:
-        raise ValueError("dataset contains no samples")
-    return samples
 
 
 def _group_key(sample: FilteringSample) -> tuple[str, ...]:
@@ -92,20 +72,10 @@ def split_samples(
     return splits
 
 
-def to_sft_record(sample: FilteringSample) -> dict[str, list[dict[str, str]]]:
-    response = json.dumps(
-        sample.label.model_dump(), ensure_ascii=False, separators=(",", ":")
-    )
-    parse_model_output(response)
-    return {
-        "messages": [
-            *build_messages(sample.notification, sample.context),
-            {"role": "assistant", "content": response},
-        ]
-    }
 
 
 def prepare_dataset(dataset: Path, output_dir: Path, seed: int = 42) -> dict:
+    dataset = resolve_existing_path(dataset)
     samples = load_samples(dataset)
     splits = split_samples(samples, seed)
     output_dir.mkdir(parents=True, exist_ok=True)

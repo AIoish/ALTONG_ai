@@ -14,6 +14,12 @@ def label(urgency: int, relevance: int, category: str = "일반 업무") -> Filt
 
 
 class EvaluationMetricTests(unittest.TestCase):
+    def test_relevant_low_urgency_alert_is_a_gold_pass(self) -> None:
+        report = score_predictions([label(2, 4), label(1, 1)], [label(2, 3), label(1, 1)])
+        self.assertEqual(report["policy_accuracy"], 0.5)
+        self.assertEqual(report["gold_block_count"], 1)
+        self.assertEqual(report["unnecessary_false_pass_rate"], 0)
+
     def test_urgent_miss_and_unnecessary_pass_are_separate(self) -> None:
         gold = [label(5, 1), label(1, 1), label(3, 4)]
         predicted = [label(2, 1), label(4, 1), None]

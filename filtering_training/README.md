@@ -1,70 +1,76 @@
-# 필터링 학습·평가 도구
+# 필터링 학습 도구
 
-실시간 알림 필터링을 위한 데이터 준비, 학습, 평가 코드를 관리합니다.
-앱에서 사용하는 스키마·프롬프트·정책은 `src/filtering`에 있습니다.
-명령은 저장소 루트에서 실행합니다.
+필터링 데이터 생성, 검수, 학습, 평가에 사용하는 오프라인 도구입니다.
+파일별 역할과 현재 사용 여부는 [FILE_GUIDE.md](FILE_GUIDE.md)를 참고하세요.
 
-## 폴더 구성
+## 폴더 구조
+
+| 폴더 | 역할 |
+| --- | --- |
+| `common/` | 공통 데이터 읽기·학습 형식 변환·경로 처리 |
+| `generation/` | 현재 v3 데이터 생성·확장 |
+| `preparation/` | 데이터 분할·학습 형식 준비 |
+| `quality/` | 데이터 형식·모순·문맥 편향 검사 |
+| `modeling/` | 모델 학습·추론·평가 |
+| `review/` | 원격 #14에서 추가된 정답 비공개 검수표·오류 검수 도구 |
+| `legacy/` | 현재 v3에서 사용하지 않는 이전 실험 코드와 과거 안내 |
+| `data/` | 기존 고정 입력 자료. 이번 정리에서 내용과 위치를 변경하지 않음 |
+| `outputs/` | 데이터·가중치·검수표·실험 결과. [결과 안내](docs/ARTIFACTS.md) |
+
+## 현재 v3 작업
 
 ```text
-filtering_training/
-  train.py                 Qwen LoRA·QLoRA 학습
-  evaluate.py              모델 평가
-  infer_sample.py          JSON 입력·스트림 추론
-  compare_evaluations.py   평가 결과 비교
-  datasets/                데이터 검증·감사·학습/평가 분할
-  generation/              합성 데이터 생성·5,000행 확장
-  external/                외부 후보 선택·번역·검토
-  review/                  라벨 검수표 작성
-  checks/                  정책 데모·모델 로딩 시험
-  docs/                    상세 실행 안내·산출물 보관 안내
-  data/                    로컬 데이터와 추적 중인 샘플
-  outputs/                 모델·평가 결과·과거 실험 보관본
+generation/generate_v3_seed.py
+  → generation/expand_v3_dataset.py
+  → preparation/prepare_reviewed_v3.py
+  → modeling/train.py 또는 modeling/train_linear_baseline.py
+  → modeling/evaluate.py
 ```
 
-`__init__.py`의 `TRAINING_ROOT`를 기준으로 기본 데이터·산출물 경로를 계산합니다.
-폴더를 옮겨도 데이터와 모델의 저장 위치는 기존 `data/`, `outputs/`를 사용합니다.
+현재 데이터는 `outputs/v3_reviewed_01/`에 있습니다. 원문 66개·문맥 변형 198건이며,
+학습 150건, 검증 24건, 테스트 24건입니다. 원문 24개를 사람이 개별 검수했고
+나머지 42개는 합성 후보입니다. 테스트는 모델 선택에 사용하지 않았습니다.
 
-## 설치와 기본 확인
+- [최근 실험 결과와 날짜순 기록](../docs/filtering-experiment-log.md)
+- 로컬 상세 결과: `outputs/v3_reviewed_01/pilot_summary.md`
+- 로컬 학습 어댑터: `outputs/v3_reviewed_01/qwen06_pilot/adapter/`
 
-공통 환경과 CUDA PyTorch 설치는 저장소 루트 README를 참고합니다.
+`outputs/`와 로컬 검수·이동 기록은 Git에서 제외되므로 GitHub에는 위 로컬 파일이 없습니다.
+공유할 성능 요약은 추적되는 실험 기록에 남깁니다.
+
+정책은 긴급도 4 이상 **또는** 관련도 4 이상이면 통과입니다.
+집중 모드 ON을 전제로 하며, 빈 창도 쉬는 상태로 추정하지 않습니다.
+실제 앱의 공통 규칙과 출력 계약은 `src/filtering/`에 있습니다.
+
+## 실행 예시
+
+저장소 루트에서 실행합니다. 학습·평가에는 설치된 학습 의존성이 필요합니다.
+각 도구의 인자는 `python -m <모듈> --help`로 확인할 수 있습니다.
 
 ```powershell
-python -m pip install -r filtering_training/requirements.txt
-python -m filtering_training.datasets.validate_dataset
-python -m filtering_training.checks.demo_policy
-python -B -m unittest discover -s tests/filtering -v
+python -m filtering_training.modeling.train --prepared-dir filtering_training/outputs/v3_reviewed_01/prepared --run-dir filtering_training/outputs/runs/qwen06_next --model Qwen/Qwen3-0.6B --max-steps 150 --max-length 768 --qlora
+python -m filtering_training.modeling.evaluate --dataset filtering_training/outputs/v3_reviewed_01/dataset.jsonl --prepared-dir filtering_training/outputs/v3_reviewed_01/prepared --split validation --model Qwen/Qwen3-0.6B --adapter filtering_training/outputs/v3_reviewed_01/qwen06_pilot/adapter --load-in-4bit --output filtering_training/outputs/runs/qwen06_validation.json --show-examples 0
 ```
 
-## 자주 사용하는 명령
+위 명령은 사용 예시이며 이번 정리 중 재학습하거나 재평가하지 않았습니다.
+모델을 0.6B로 명시합니다. 일부 도구의 과거 기본값은 이번 구조 정리에서 변경하지 않았습니다.
+새 실험은 별도 실행 폴더를 사용하고 기존 검수·가중치를 덮어쓰지 마세요.
 
-| 작업 | 실행 명령 |
-| --- | --- |
-| 샘플을 SFT 데이터로 변환 | `python -m filtering_training.datasets.prepare_dataset` |
-| 데이터 품질 점검 | `python -m filtering_training.datasets.audit_dataset --help` |
-| 평가셋 준비 | `python -m filtering_training.datasets.prepare_holdout --help` |
-| 기존 3,000행 생성 | `python -m filtering_training.generation.generate_rapid_dataset --help` |
-| 5,000행 확장 | `python -m filtering_training.generation.generate_targeted_dataset --help` |
-| 상황 유형별 분할 | `python -m filtering_training.datasets.prepare_rapid_dataset --help` |
-| 라벨 검수표 작성 | `python -m filtering_training.review.prepare_label_review --help` |
-| 학습·평가·추론·비교 | 상위 폴더의 네 모듈에 `--help` 사용 |
+## 호환과 보관
 
-생성·분할 명령은 출력 파일을 만들므로, 기존 실험을 보존하려면 상세 안내에서
-입력·출력 경로를 확인합니다. 모델 로딩 시험은
-`python -m filtering_training.checks.smoke_test_model`이며 모델 다운로드·GPU 사용이 발생할 수 있습니다.
+최신 `develop`의 #14에서 추가된 스트림 추론(`--stream`), JSON 입력(`--input-json`),
+어댑터 추가학습(`--init-adapter`), 모델 비교·검수 도구를 보존했습니다.
+`datasets/`, `checks/`, `external/` 및 기존 `generation/`의 모듈 경로도 호환됩니다.
+원격의 기존 import와 로컬의 이전 명령을 모두 유지하기 위한 경로입니다.
 
-## 상세 문서
+예전 `python -m filtering_training.train` 및 기존 import도 유지됩니다.
+`__init__.py`에서 옮긴 모듈을 찾을 경로를 제공합니다. 새 코드·명령에서는 역할별
+패키지 경로를 사용합니다. 기존 모듈과 새 모듈 이름을 혼용한 monkeypatch는 피하세요.
 
-- [기존 학습·평가·데이터 작업 안내](docs/WORKFLOWS.md): 이전 README의 설명과 실험 기록을 보존했습니다.
-- [모델·데이터 위치와 과거 실험 복원](docs/ARTIFACTS.md)
-- [필터링 실험 기록](../docs/filtering-experiment-log.md)
-- [필터링 라벨링 기준](../docs/filtering-labeling-guideline.md)
+이전 결과는 `outputs/archive/legacy_20261003/`로 이동했습니다.
+공통 데이터 읽기와 모델 학습·평가의 입력 경로는 없어진 이전 경로를 해당 보관 위치에서 찾습니다.
+이 기능은 누락된 입력을 찾는 용도이며 결과 저장 경로나 모든 역사 문서 링크를 자동 변경하지 않습니다.
+일회성 과거 스크립트와 실행 로그의 경로 문자열은 당시 실행 기록으로 보존했습니다.
 
-2026-09-30 폴더 정리로 보조 도구의 모듈 경로가 바뀌었습니다.
-예: `filtering_training.prepare_dataset` → `filtering_training.datasets.prepare_dataset`.
-기존 명령·개인 스크립트는 위 폴더 구성을 기준으로 경로를 바꿔 실행합니다.
-압축 보관한 과거 스크립트도 복원 후 import 경로를 갱신해야 합니다.
-학습·평가·추론·결과 비교의 네 가지 상위 모듈 경로는 같습니다.
-
-현재 Qwen 기본 모델과 학습 방식은 기존 설정을 사용합니다.
-RoBERTa 분류 모델 실험은 별도 후속 작업입니다.
+과거 명령과 설명은 [legacy/EXPERIMENTS.md](legacy/EXPERIMENTS.md)에 보관했습니다.
+이번 구조 정리에서 데이터·가중치를 삭제하지 않았습니다.

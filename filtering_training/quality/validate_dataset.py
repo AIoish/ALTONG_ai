@@ -1,7 +1,7 @@
+
+from filtering_training.common.paths import TRAINING_ROOT
 import json
 from pathlib import Path
-
-from filtering_training import TRAINING_ROOT
 
 from src.filtering.schema import FilteringSample
 

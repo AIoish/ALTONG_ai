@@ -3,17 +3,17 @@
 The translated file is a Git-ignored intermediate, never a labeled training set.
 Source priority is deliberately excluded. Source text stays for comparison.
 """
+
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
 import argparse
 import hashlib
 import json
 import time
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
+from filtering_training.legacy.external.select_external_candidates import OUTPUT_PATH as SOURCE_PATH
 
-from filtering_training.external.select_external_candidates import OUTPUT_PATH as SOURCE_PATH
-
-OUTPUT_PATH = TRAINING_ROOT / "outputs" / "external" / "notifai" / "translated_candidates.jsonl"
+OUTPUT_PATH = LEGACY_OUTPUTS_ROOT / "external" / "notifai" / "translated_candidates.jsonl"
 MODEL_NAME = "facebook/m2m100_418M"
 
 

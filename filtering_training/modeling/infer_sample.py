@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
+from filtering_training.common.paths import TRAINING_ROOT, resolve_existing_path
 
 from src.filtering.policy import should_pass
 from src.filtering.prompt import build_messages, parse_model_output
@@ -22,6 +22,8 @@ def parse_input(payload: dict) -> tuple[RawNotification, CurrentContext]:
 
 
 def load_model(model_name: str, adapter: Path | None):
+    if adapter is not None:
+        adapter = resolve_existing_path(adapter)
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
@@ -85,6 +87,9 @@ def main() -> None:
                         help="keep the model loaded and read one notification/context JSON per stdin line")
     parser.add_argument("--sample-index", type=int, default=0)
     args = parser.parse_args()
+    args.dataset = resolve_existing_path(args.dataset)
+    if args.input_json is not None:
+        args.input_json = resolve_existing_path(args.input_json)
     if args.sample_index < 0:
         parser.error("--sample-index must be non-negative")
     if args.stream and args.input_json is not None:

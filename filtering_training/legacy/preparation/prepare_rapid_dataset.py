@@ -1,5 +1,7 @@
 """Prepare provisional rapid candidates with scenario-family isolation."""
 
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
+
 import argparse
 import hashlib
 import json
@@ -7,14 +9,12 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
-from filtering_training.generation.generate_rapid_dataset import OUTPUT_PATH
-from filtering_training.datasets.prepare_dataset import load_samples, to_sft_record
+from filtering_training.legacy.generation.generate_rapid_dataset import OUTPUT_PATH
+from filtering_training.common.dataset import load_samples, to_sft_record
 from src.filtering.prompt import CATEGORIES
 
 
-OUTPUT_DIR = TRAINING_ROOT / "outputs" / "prepared_rapid"
+OUTPUT_DIR = LEGACY_OUTPUTS_ROOT / "prepared_rapid"
 
 
 def prepare(dataset: Path = OUTPUT_PATH, output_dir: Path = OUTPUT_DIR,

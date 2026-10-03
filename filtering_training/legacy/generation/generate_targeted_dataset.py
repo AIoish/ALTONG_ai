@@ -4,6 +4,8 @@ Five families/category x five subjects x five semantic states x two contexts.
 Labels are authored, provisional, and need independent review. No private file
 or development-evaluation wording is read for generation.
 """
+
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
 import argparse
 import hashlib
 import json
@@ -11,16 +13,14 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
-from filtering_training.datasets.audit_dataset import audit_samples
-from filtering_training.generation.generate_rapid_dataset import OUTPUT_PATH as BASE_DATASET
-from filtering_training.datasets.prepare_dataset import load_samples
-from filtering_training.datasets.prepare_holdout import HOLDOUT_PATH, notification_key
+from filtering_training.quality.audit_dataset import audit_samples
+from filtering_training.legacy.generation.generate_rapid_dataset import OUTPUT_PATH as BASE_DATASET
+from filtering_training.common.dataset import load_samples
+from filtering_training.preparation.prepare_holdout import HOLDOUT_PATH, notification_key
 from src.filtering.prompt import CATEGORIES, parse_model_output
 from src.filtering.schema import FilteringSample
 
-ROOT = TRAINING_ROOT / "outputs"
+ROOT = LEGACY_OUTPUTS_ROOT
 OUTPUT_PATH = ROOT / "candidates" / "targeted_korean_2000.jsonl"
 COMBINED_PATH = ROOT / "candidates" / "combined_korean_5000.jsonl"
 
