@@ -1,12 +1,4 @@
-# 필터링 상세 작업 안내
-
-## 현재 v3와 이전 실험 구분 (2026-10-03)
-
-현재 작업은 현실적인 합성 메시지와 0.6B 모델의 v3 파일럿입니다.
-최신 실행 방법은 [상위 README](../README.md), 파일별 역할은 [FILE_GUIDE](../FILE_GUIDE.md)에 있습니다.
-아래 초기·1.7B·4B 명령과 성능은 이전 실험 설명이며, 현재 앱 적용 모델을 정한 결과가 아닙니다.
-모듈 경로와 보관 위치는 최신 구조로 갱신했으며 스트림 추론·추가학습·비교 기능은 유지합니다.
-새 실험에는 새 실행 폴더를 지정하고 기존 자료를 덮어쓰지 않습니다.
+# Filtering model training
 
 This directory contains offline dataset preparation, validation, model training,
 and evaluation tools for the real-time filtering model.
@@ -14,6 +6,48 @@ and evaluation tools for the real-time filtering model.
 Application runtime code remains in `src/filtering`. Training code may import
 the shared schemas, prompts, and policy from that package, but runtime code must
 not import from `filtering_training`.
+
+The filtering policy is `urgency_score >= 4 or relevance_score >= 4`
+(`urgency4_or_relevance4_v2`). Relevance 4 means directly useful to the current
+goal; a shared topic alone does not qualify. The labeling guideline documents
+the score boundaries. Evaluation reports record the policy version, and older
+policy metrics must be recalculated before comparison. Regenerate prepared
+SFT inputs before the next training run because the shared prompt has changed.
+
+## Reviewed v3 pilot (2026-10-03)
+
+The current dataset pilot uses realistic notification messages, urgency independent
+of context, and relevance 4 for information directly useful to the current goal.
+All cases assume focus mode is ON, including cases without an active window.
+Older generated datasets are excluded from this pilot.
+
+Artifacts are local under `outputs/v3_reviewed_01/`: 66 notification originals,
+198 context variants, split into 150 training, 24 validation, and 24 test cases.
+The first 16 originals and 8 boundary originals were individually reviewed;
+the remaining 42 are authored synthetic candidates checked structurally. Two
+of those candidates were added after review to provide an independent
+calendar/advertisement group for evaluation. They are identified in `approval.json`.
+
+`prepare_reviewed_v3.py` preserves the approved 192 cases and keeps all variants
+of each notification, shared populated windows, and explicitly listed semantic
+families within one split. This guards these known overlap sources; it is not
+an exhaustive semantic similarity detector. `split_audit.json` records the
+original preservation and SFT consistency checks. Each evaluation split has
+only 8 independent notifications, so these are pilot measurements rather than
+evidence of production quality. Test cases must remain unused for model selection.
+
+```powershell
+python -m filtering_training.preparation.prepare_reviewed_v3 --approval-text "딱 좋다. ㅇㅇ" --approval-date 2026-10-03
+python -m filtering_training.modeling.train_linear_baseline --dataset filtering_training/outputs/v3_reviewed_01/dataset.jsonl --prepared-dir filtering_training/outputs/v3_reviewed_01/prepared --run-dir filtering_training/outputs/v3_reviewed_01/linear_baseline
+python -m filtering_training.modeling.train --prepared-dir filtering_training/outputs/v3_reviewed_01/prepared --run-dir filtering_training/outputs/v3_reviewed_01/qwen06_pilot --model Qwen/Qwen3-0.6B --max-steps 150 --max-length 768 --qlora
+python -m filtering_training.modeling.evaluate --dataset filtering_training/outputs/v3_reviewed_01/dataset.jsonl --prepared-dir filtering_training/outputs/v3_reviewed_01/prepared --split validation --model Qwen/Qwen3-0.6B --load-in-4bit --output filtering_training/outputs/v3_reviewed_01/qwen06_base_validation_report.json --predictions-output filtering_training/outputs/v3_reviewed_01/qwen06_base_validation_predictions.jsonl --show-examples 0
+python -m filtering_training.modeling.evaluate --dataset filtering_training/outputs/v3_reviewed_01/dataset.jsonl --prepared-dir filtering_training/outputs/v3_reviewed_01/prepared --split validation --model Qwen/Qwen3-0.6B --adapter filtering_training/outputs/v3_reviewed_01/qwen06_pilot/adapter --load-in-4bit --output filtering_training/outputs/v3_reviewed_01/qwen06_pilot/validation_report.json --predictions-output filtering_training/outputs/v3_reviewed_01/qwen06_pilot/validation_predictions.jsonl --show-examples 0
+```
+
+The preparation command rejects nonempty output directories and unresolved review
+edits. These commands document the recorded local run; use new output directories
+and the actual approval statement for a new review. Model defaults elsewhere
+still describe older experiments; this pilot passes the 0.6B model explicitly.
 
 ## Setup
 
@@ -37,10 +71,6 @@ python -m filtering_training.legacy.diagnostics.smoke_test_model
 Generated checkpoints, adapters, and experiment outputs belong under
 `filtering_training/outputs` and must not be committed.
 
-See [ARTIFACTS.md](ARTIFACTS.md) for the local data/model directory map and
-restoration instructions for historical experiments archived on 2026-09-30.
-Older commands referencing archived adapters require restoring that run first.
-
 ## One-sample model check
 
 ```powershell
@@ -58,7 +88,7 @@ python -m filtering_training.preparation.prepare_dataset
 ```
 
 The command validates the samples and writes train, validation, and test JSONL
-files plus a split manifest to `filtering_training/outputs/archive/legacy_20261003/prepared`. The
+files plus a split manifest to `filtering_training/outputs/prepared`. The
 current synthetic examples are only for pipeline checks. Notifications with the
 same text and different contexts stay in one split. The assistant target contains
 only the four model label fields; the prompt includes the normalized current
@@ -73,7 +103,7 @@ python -m filtering_training.modeling.evaluate --split test --adapter filtering_
 ```
 
 Run `prepare_dataset` first. Evaluation writes aggregate metrics and run metadata
-to `filtering_training/outputs/archive/legacy_20261003/evaluation`; it does not save raw notifications.
+to `filtering_training/outputs/evaluation`; it does not save raw notifications.
 Model responses are not saved unless `--examples-output` is provided. By default, evaluation prints three model JSON examples; use
 `--examples-output PATH` to save those examples as UTF-8 JSON. Record reviewed
 experiment results and 3-5 examples in `docs/filtering-experiment-log.md`.
@@ -157,8 +187,8 @@ only in the Git-ignored `filtering_training/outputs/archive/legacy_20261003/exte
 ```powershell
 New-Item -ItemType Directory -Force filtering_training/outputs/archive/legacy_20261003/external/notifai | Out-Null
 Invoke-WebRequest -Uri 'https://huggingface.co/datasets/charlesfeng1/notifai-dataset/resolve/e641bb311e31c6582143866eed37c88adf1ed8f9/training_data.jsonl' -OutFile filtering_training/outputs/archive/legacy_20261003/external/notifai/training_data.jsonl
-python -m filtering_training.external.select_external_candidates
-python -m filtering_training.external.adapt_external_pilot
+python -m filtering_training.legacy.external.select_external_candidates
+python -m filtering_training.legacy.external.adapt_external_pilot
 ```
 
 Selection removes malformed rows, repeated title/body pairs, overly short or long
@@ -188,9 +218,9 @@ using [M2M100 418M](https://huggingface.co/facebook/m2m100_418M) (MIT license).
 The source is the Apache-2.0 NotifAI dataset linked above. Run:
 
 ```powershell
-python -m filtering_training.external.translate_external_candidates --limit 50 --output filtering_training/outputs/archive/legacy_20261003/external/notifai/translated_50.jsonl
-python -m filtering_training.external.translate_external_candidates --limit 3000
-python -m filtering_training.external.audit_external_translations
+python -m filtering_training.legacy.external.translate_external_candidates --limit 50 --output filtering_training/outputs/archive/legacy_20261003/external/notifai/translated_50.jsonl
+python -m filtering_training.legacy.external.translate_external_candidates --limit 3000
+python -m filtering_training.legacy.external.audit_external_translations
 ```
 
 The translator keeps the public source ID and English title/body beside its Korean
@@ -330,89 +360,3 @@ so this is not perfect prediction of all output fields. Mean generation time was
 7.89 seconds/case. The adapter is a promising development candidate, pending
 untouched evaluation, label review, and latency work. No default model switch,
 training beyond 500 steps, commit, or push was performed.
-
-## Frozen 100-case candidate evaluation
-
-The new synthetic evaluation set is stored locally at
-`outputs/archive/legacy_20261003/independent_eval_100/notifications.jsonl`. It contains 100 separately
-authored alerts, with gold labels fixed before inspecting model predictions.
-All eight categories have 12 or 13 cases: 27 urgent, 37 policy PASS, 63 BLOCK.
-It includes empty contexts, weak context relevance, advertising that uses urgent
-wording, and both actionable and resolved security events. IDs and normalized
-alert text are checked against the 5,000-row expansion, previous 24-case
-development set, and tracked samples. Labels are provisional author labels;
-independent human review has not been performed. Non-overlap does not prove
-independence from training styles.
-
-Evaluate sequentially on the local GPU using the frozen manifest:
-
-```powershell
-python -m filtering_training.modeling.evaluate --dataset filtering_training/outputs/archive/legacy_20261003/independent_eval_100/notifications.jsonl --prepared-dir filtering_training/outputs/archive/legacy_20261003/independent_eval_100/prepared --model Qwen/Qwen3-1.7B --adapter filtering_training/outputs/archive/legacy_20261003/lora-rapid-qwen3-1_7b-500/adapter --output filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen1_7b.json --examples-output filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen1_7b_predictions.json --show-examples 100
-python -m filtering_training.modeling.evaluate --dataset filtering_training/outputs/archive/legacy_20261003/independent_eval_100/notifications.jsonl --prepared-dir filtering_training/outputs/archive/legacy_20261003/independent_eval_100/prepared --model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit --adapter filtering_training/outputs/archive/legacy_20261003/qlora-qwen3-4b-500-20260930/adapter --output filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen4b.json --examples-output filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen4b_predictions.json --show-examples 100
-python -m filtering_training.modeling.compare_evaluations --dataset filtering_training/outputs/archive/legacy_20261003/independent_eval_100/notifications.jsonl --run filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen1_7b.json filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen1_7b_predictions.json --run filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen4b.json filtering_training/outputs/archive/legacy_20261003/independent_eval_100/qwen4b_predictions.json --output filtering_training/outputs/archive/legacy_20261003/independent_eval_100/comparison.json
-```
-
-The comparison verifies dataset/prompt hashes, complete ordered predictions,
-and recomputed metrics. It records per-category metrics, errors, and urgent
-invalid JSON separately from explicit false blocks. This compares candidate
-pipelines, not model size alone: training corpora, LoRA targets, learning rates
-and precision differ. Keep these cases out of training. Once their results
-inform changes, treat them as development data and reserve new final cases.
-
-To verify the production-style JSON contract without a gold label, use a local
-file containing `{ "notification": {...}, "context": {...} }`. Both snake_case
-and the C# property aliases accepted by the schema are supported; recent
-processes may contain at most three entries. Run, for example:
-
-```powershell
-python -m filtering_training.modeling.infer_sample --input-json filtering_training/outputs/archive/legacy_20261003/independent_eval_100/demo_input_001.json --model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit --adapter filtering_training/outputs/archive/legacy_20261003/qlora-qwen3-4b-500-20260930/adapter
-```
-
-This command loads the model per invocation and prints the validated four label
-fields plus the computed `is_passed` policy decision. It is a local contract
-probe, not an optimized persistent serving process or a Windows-client
-integration.
-
-Observed frozen 100-case comparison: 1.7B LoRA 86/100 policy and 73/100 exact
-category at 3.21 s mean generation; 4B NF4 QLoRA 94/100 policy and 85/100
-exact category at 7.70 s mean generation. The 4B candidate blocked 2/27
-urgent cases and passed 2/63 gold BLOCK cases. It remains a candidate rather
-than a default-model switch. Review disputed author labels and check a fresh
-unseen set after tuning. Actual three input/output pairs are recorded in
-`docs/filtering-experiment-log.md`.
-
-For a long-running demo, use `python -m filtering_training.modeling.infer_sample --stream
---model filtering_training/outputs/models/qwen3-4b-instruct-2507-bnb-4bit
---adapter filtering_training/outputs/archive/legacy_20261003/qlora-qwen3-4b-500-20260930/adapter`.
-Send one notification/context JSON object per stdin line. The process loads the
-model once and flushes one result JSON line per valid input line. Invalid input
-or invalid model output produces a compact `error` JSON line and does not stop
-later requests. The client should treat such errors as failed decisions.
-Three actual local inputs yielded identical outputs in single-call and stream
-modes. Stream mode took 37.06 seconds end-to-end for all three, including one
-model load; this tiny benchmark is not a per-alert latency estimate. Across the
-frozen 100 cases the 4B generation mean was 7.70 seconds, p95 9.76 seconds,
-excluding tokenization and loading. Persistent loading removes repeated startup
-work, but the GPU generation cost remains. Further latency work is needed.
-
-## Continued-adapter experiment
-
-The optional `--init-adapter` training flag loads a saved QLoRA adapter as
-trainable weights into a new run directory. It checks the source run's model,
-dataset hash, sequence length and LoRA target modules before loading. This
-starts a fresh optimizer and schedule; it does not resume Trainer optimizer
-state. Keep `--qlora` and the same base model/targets when using it.
-
-A local 250-step continuation from the 4B 500-step adapter at learning rate
-0.00002 lowered 702-row validation loss to 0.2465, but the inspected 100-case
-policy score fell from 94/100 to 92/100. Category accuracy stayed 85/100.
-The original 500-step adapter remains the preferred candidate; defaults stay
-unchanged. Detailed changed-case inputs and outputs are in the experiment log.
-
-A second, post-error targeted stress set of 80 local synthetic alerts has been
-checked against prior text and evaluated with both trained candidates. The 4B
-500-step adapter scored 76/80 policy decisions with zero urgent false blocks;
-1.7B scored 65/80. Detailed metrics and three exact input/output examples are
-in the experiment log. Because this set was authored after earlier errors were
-seen, it is not an unbiased final evaluation. Blind review sheets for both
-local evaluation sets are under their respective `outputs/.../review/` folders.

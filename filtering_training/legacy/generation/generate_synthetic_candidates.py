@@ -4,21 +4,22 @@ The private real-notification sample is never read or copied by this generator.
 Generated JSONL belongs under the ignored outputs directory until labels are reviewed.
 """
 
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
+
 import argparse
 import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
-from filtering_training.datasets.prepare_dataset import DATASET_PATH, load_samples
-from filtering_training.datasets.prepare_holdout import HOLDOUT_PATH, notification_key
+from filtering_training.common.dataset import load_samples
+from filtering_training.preparation.prepare_dataset import DATASET_PATH
+from filtering_training.preparation.prepare_holdout import HOLDOUT_PATH, notification_key
 from src.filtering.prompt import CATEGORIES, parse_model_output
 from src.filtering.schema import FilteringSample
 
 
-OUTPUT_PATH = TRAINING_ROOT / "outputs" / "candidates" / "synthetic_batch_01.jsonl"
+OUTPUT_PATH = LEGACY_OUTPUTS_ROOT / "candidates" / "synthetic_batch_01.jsonl"
 BASE_TIME = datetime(2026, 9, 25, 9, 0, tzinfo=timezone.utc)
 
 # category, urgency, app, sender, title, body, task topic. All people/projects are fictional.

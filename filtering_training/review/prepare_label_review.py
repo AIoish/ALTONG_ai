@@ -6,8 +6,9 @@ import json
 import random
 from pathlib import Path
 
-from filtering_training.compare_evaluations import compare
-from filtering_training.datasets.prepare_dataset import load_samples
+from filtering_training.modeling.compare_evaluations import compare
+from filtering_training.common.dataset import load_samples
+from filtering_training.common.paths import resolve_existing_path
 from src.filtering.policy import should_pass
 
 
@@ -32,6 +33,9 @@ def write_csv(path: Path, columns: tuple[str, ...], rows: list[dict]) -> None:
 
 def prepare(dataset: Path, first: tuple[Path, Path], second: tuple[Path, Path],
             output_dir: Path) -> dict:
+    dataset = resolve_existing_path(dataset)
+    first = tuple(resolve_existing_path(path) for path in first)
+    second = tuple(resolve_existing_path(path) for path in second)
     result = compare(dataset, [first, second])
     samples = load_samples(dataset)
     by_id = {sample.notification.id: sample for sample in samples}

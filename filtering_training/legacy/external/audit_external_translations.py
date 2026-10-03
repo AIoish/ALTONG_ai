@@ -1,15 +1,15 @@
 """Audit public machine-translated notification drafts before any relabeling."""
+
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
 import argparse
 import json
 import re
 from collections import Counter
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
+from filtering_training.legacy.external.translate_external_candidates import OUTPUT_PATH as INPUT_PATH
 
-from filtering_training.external.translate_external_candidates import OUTPUT_PATH as INPUT_PATH
-
-REPORT_PATH = TRAINING_ROOT / "outputs" / "audit" / "external_translation_audit.json"
+REPORT_PATH = LEGACY_OUTPUTS_ROOT / "audit" / "external_translation_audit.json"
 DIGITS = re.compile(r"\d+")
 HANGUL = re.compile(r"[가-힣]")
 

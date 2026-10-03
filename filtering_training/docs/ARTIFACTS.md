@@ -1,5 +1,13 @@
 # 필터링 파일 안내
 
+## 최신 구조 안내 (2026-10-03)
+
+현재 v3 데이터와 실험은 `outputs/v3_seed/`, `outputs/v3_expansion_01/`, `outputs/v3_reviewed_01/`에 있습니다.
+이전 결과는 `outputs/archive/legacy_20261003/`로 묶었으며 아래 경로에도 반영했습니다.
+4B 후보와 CPU 도구에 관한 아래 설명은 이전 실험 이력입니다. 현재 v3 파일럿은 0.6B를 사용합니다.
+로컬 결과·가중치·검수표는 Git에 올리지 않습니다. 공유할 결과 요약은
+[실험 기록](../../docs/filtering-experiment-log.md)에 있습니다.
+
 2026-09-30 기준. 아래 경로는 `filtering_training/`을 기준으로 표시한다.
 이번 정리는 필터링 영역에 한정했다. 브리핑 코드·데이터·테스트와 공용 환경은 정리 대상에서 제외했다.
 
@@ -9,16 +17,16 @@
 | --- | --- |
 | 상위 학습·평가 모듈, `datasets/`, `generation/`, `external/`, `review/`, `checks/`, `requirements.txt` | 데이터 생성·검증·학습·평가·추론 도구. 기존 테스트와 실험 재현에 필요하므로 유지 |
 | `data/` | 필터링 원본·샘플·평가 데이터 |
-| `outputs/candidates/`, `outputs/audit/` | 합성 데이터 후보와 품질 점검 결과 |
-| `outputs/prepared_targeted_5000/` | 5,000행 확장 데이터의 학습·검증·테스트 분할 |
-| `outputs/prepared/`, `outputs/prepared_rapid/`, `outputs/holdout/` | 이전 데이터 분할과 실험 재현용 manifest |
-| `outputs/evaluation/` | 이전 모델의 평가 지표와 예측 예시 |
-| `outputs/independent_eval_100/`, `outputs/independent_stress_80/` | 개발 비교용 평가셋, 예측, 라벨 검수표. 학습에 혼합하지 않음 |
-| `outputs/lora-rapid-qwen3-1_7b-500/` | 비교 기준인 1.7B 500스텝 어댑터와 설정 |
-| `outputs/qlora-qwen3-4b-500-20260930/` | 현재 4B 개발 후보의 최종 어댑터, 학습 설정과 로그 |
+| `outputs/archive/legacy_20261003/candidates/`, `outputs/archive/legacy_20261003/audit/` | 합성 데이터 후보와 품질 점검 결과 |
+| `outputs/archive/legacy_20261003/prepared_targeted_5000/` | 5,000행 확장 데이터의 학습·검증·테스트 분할 |
+| `outputs/archive/legacy_20261003/prepared/`, `outputs/archive/legacy_20261003/prepared_rapid/`, `outputs/archive/legacy_20261003/holdout/` | 이전 데이터 분할과 실험 재현용 manifest |
+| `outputs/archive/legacy_20261003/evaluation/` | 이전 모델의 평가 지표와 예측 예시 |
+| `outputs/archive/legacy_20261003/independent_eval_100/`, `outputs/archive/legacy_20261003/independent_stress_80/` | 개발 비교용 평가셋, 예측, 라벨 검수표. 학습에 혼합하지 않음 |
+| `outputs/archive/legacy_20261003/lora-rapid-qwen3-1_7b-500/` | 비교 기준인 1.7B 500스텝 어댑터와 설정 |
+| `outputs/archive/legacy_20261003/qlora-qwen3-4b-500-20260930/` | 현재 4B 개발 후보의 최종 어댑터, 학습 설정과 로그 |
 | `outputs/models/` | 4B NF4 기본 모델. 위 4B 어댑터를 실행하는 데 필요 |
-| `outputs/portability_probe/`, `outputs/portability_probe.py` | CPU 시험용 GGUF 기본 모델, llama.cpp 실행 파일, 다운로드 검증 기록과 시험 스크립트 |
-| `outputs/external/` | 외부 데이터의 출처·검토 자료. 이용 범위와 라벨 검토 상태를 확인한 뒤 사용 |
+| `outputs/archive/legacy_20261003/portability_probe/`, `outputs/archive/legacy_20261003/portability_probe.py` | CPU 시험용 GGUF 기본 모델, llama.cpp 실행 파일, 다운로드 검증 기록과 시험 스크립트 |
+| `outputs/archive/legacy_20261003/external/` | 외부 데이터의 출처·검토 자료. 이용 범위와 라벨 검토 상태를 확인한 뒤 사용 |
 | `outputs/archive/` | 과거 실험의 압축 보관본 |
 | `outputs/_maintenance/` | 이번 정리에 사용한 로컬 점검·보관 스크립트 |
 

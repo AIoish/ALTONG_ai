@@ -4,6 +4,8 @@ These records have no ALTONG labels or contexts. They must be rewritten in Korea
 screened for personal information, and relabeled before use in training.
 """
 
+from filtering_training.common.paths import LEGACY_OUTPUTS_ROOT
+
 import argparse
 import hashlib
 import json
@@ -11,12 +13,10 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from filtering_training import TRAINING_ROOT
-
 
 SOURCE_URL = "https://huggingface.co/datasets/charlesfeng1/notifai-dataset"
-SOURCE_PATH = TRAINING_ROOT / "outputs" / "external" / "notifai" / "training_data.jsonl"
-OUTPUT_PATH = TRAINING_ROOT / "outputs" / "external" / "notifai" / "selected_3000.jsonl"
+SOURCE_PATH = LEGACY_OUTPUTS_ROOT / "external" / "notifai" / "training_data.jsonl"
+OUTPUT_PATH = LEGACY_OUTPUTS_ROOT / "external" / "notifai" / "selected_3000.jsonl"
 FOLDERS = ("Work", "Personal", "Alerts", "Promotions")
 SENSITIVE_PATTERN = re.compile(r"https?://|www\.|[\w.+-]+@[\w.-]+|\b\d{7,}\b", re.I)
 
