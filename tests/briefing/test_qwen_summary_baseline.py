@@ -12,6 +12,7 @@ from briefing_training.prompts import (
     SummaryResponseError,
     build_messages,
     parse_summary_response,
+    parse_summary_response_with_metadata,
 )
 from briefing_training.smoke_test_model import attach_adapter
 
@@ -93,6 +94,24 @@ class QwenSummaryBaselineTests(unittest.TestCase):
         )
 
         self.assertEqual(parsed, ("가상 알림 요약",))
+
+    def test_parser_safely_repairs_bare_summary_array(self) -> None:
+        parsed = parse_summary_response_with_metadata(
+            '["Windows 기기를 차단했습니다.","활성 세션을 로그아웃했습니다."]'
+        )
+
+        self.assertEqual(
+            parsed.summary_lines,
+            ("Windows 기기를 차단했습니다.", "활성 세션을 로그아웃했습니다."),
+        )
+        self.assertTrue(parsed.format_repaired)
+
+    def test_parser_can_require_the_strict_object_contract(self) -> None:
+        with self.assertRaisesRegex(SummaryResponseError, "only"):
+            parse_summary_response(
+                '["요약"]',
+                allow_list_repair=False,
+            )
 
     def test_parser_rejects_thinking_or_explanatory_text(self) -> None:
         with self.assertRaises(SummaryResponseError):

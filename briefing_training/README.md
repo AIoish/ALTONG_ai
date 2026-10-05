@@ -43,8 +43,12 @@ two cases cover fragmented same-sender chat messages, and eight cases cover
 colloquial sentence fragments with omitted subjects, references such as
 "that one" or "there," and facts spread across consecutive short messages.
 
-The evaluator reports structured JSON compliance, expected-fact coverage,
-superseded-state violations, per-case pass rate, and average generation latency.
+The evaluator reports usable structured-output rate, strict raw JSON-contract
+compliance, safe format-repair rate, expected-fact coverage, superseded-state
+violations, per-case pass rate, and average generation latency. A bare JSON
+string array is safely normalized to `summary_lines` for runtime resilience,
+while the raw-contract and repair metrics preserve visibility into the model's
+original format violation. Other malformed outputs remain errors.
 Fact alternatives allow equivalent source expressions such as recovery and
 normalization. Each case also contains a human-written reference summary for
 manual review; the reference is never used for fine-tuning or exact-match
@@ -118,9 +122,10 @@ and an older preinstalled torchao release can prevent current PEFT versions
 from loading the saved adapter.
 
 The training command uses 4-bit NF4 quantization and trains only LoRA adapter
-parameters. The base model remains unchanged. Training outputs must stay in
-Google Drive or the ignored local `outputs` directory and must not be committed
-to Git.
+parameters. The default sequence length is 2,048 tokens so the summary target
+is not truncated after the Korean prompt. The base model remains unchanged.
+Training outputs must stay in Google Drive or the ignored local `outputs`
+directory and must not be committed to Git.
 
 ## Evaluate a trained adapter
 

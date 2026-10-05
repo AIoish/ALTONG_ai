@@ -9,7 +9,7 @@ from typing import Any, Mapping, Sequence
 
 from src.briefing.schema import FILTER_CATEGORIES
 
-from .prompts import MODEL_NAME, parse_summary_response
+from .prompts import MODEL_NAME, parse_summary_response_with_metadata
 from .smoke_test_model import (
     DEFAULT_CASES_PATH,
     generate_summary,
@@ -122,6 +122,8 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
         f"- 모델: `{report['model']}`",
         f"- 평가 사례: {report['case_count']}개",
         f"- 구조화 출력 성공률: {report['structured_output_rate']}",
+        f"- 원본 JSON 계약 준수율: {report['raw_contract_compliance_rate']}",
+        f"- 안전 형식 보정률: {report['format_repair_rate']}",
         f"- 사례 통과율: {report['case_pass_rate']}",
         f"- 사실 정보 포함률: {report['fact_coverage']}",
         "",
@@ -139,6 +141,7 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
                 f"- 카테고리: {result['category']}",
                 f"- 핵심 사실: {result['fact_hits']}/{result['fact_total']}",
                 f"- 줄 수 제한 통과: {result['line_limit_passed']}",
+                f"- 출력 형식 자동 보정: {result['format_repaired']}",
                 f"- 누락된 핵심 사실: "
                 f"{result['missing_expected_facts'] or '없음'}",
                 f"- 금지 표현 검출: "
@@ -190,6 +193,8 @@ def main() -> None:
     validate_evaluation_cases(cases)
     tokenizer, model = load_model(adapter_path=args.adapter_path)
     structured_count = 0
+    raw_contract_count = 0
+    format_repair_count = 0
     fact_hits = 0
     fact_total = 0
     passed_case_count = 0
@@ -216,8 +221,14 @@ def main() -> None:
         fact_total += len(expected_facts)
 
         try:
-            summary_lines = parse_summary_response(raw_response)
+            parsed_response = parse_summary_response_with_metadata(raw_response)
+            summary_lines = parsed_response.summary_lines
+            format_repaired = parsed_response.format_repaired
             structured_count += 1
+            if format_repaired:
+                format_repair_count += 1
+            else:
+                raw_contract_count += 1
             combined = " ".join(summary_lines)
             hits = sum(
                 any(alternative in combined for alternative in alternatives)
@@ -245,6 +256,7 @@ def main() -> None:
             forbidden_hits = ()
             line_limit_passed = False
             error = str(exc)
+            format_repaired = False
 
         passed = (
             error is None
@@ -261,6 +273,8 @@ def main() -> None:
                 "category": group.get("category"),
                 "passed": passed,
                 "structured_output": error is None,
+                "raw_contract_compliant": error is None and not format_repaired,
+                "format_repaired": format_repaired,
                 "fact_hits": hits,
                 "fact_total": len(expected_facts),
                 "missing_expected_facts": missing_expected_facts,
@@ -290,6 +304,10 @@ def main() -> None:
         else None,
         "case_count": len(cases),
         "structured_output_rate": round(structured_count / len(cases), 4),
+        "raw_contract_compliance_rate": round(
+            raw_contract_count / len(cases), 4
+        ),
+        "format_repair_rate": round(format_repair_count / len(cases), 4),
         "case_pass_rate": round(passed_case_count / len(cases), 4),
         "fact_coverage": round(fact_hits / fact_total, 4)
         if fact_total

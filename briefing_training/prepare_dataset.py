@@ -1084,7 +1084,7 @@ def validate_records(
         if not isinstance(target, Mapping) or not isinstance(max_summary_lines, int):
             raise ValueError(f"{case_id} has an invalid target contract")
         raw_target = json.dumps(target, ensure_ascii=False, separators=(",", ":"))
-        parsed = parse_summary_response(raw_target)
+        parsed = parse_summary_response(raw_target, allow_list_repair=False)
         if len(parsed) > max_summary_lines or max_summary_lines > MAX_SUMMARY_LINES:
             raise ValueError(f"{case_id} exceeds its line limit")
         training_messages(record)

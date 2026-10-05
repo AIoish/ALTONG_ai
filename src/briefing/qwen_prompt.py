@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 
@@ -43,6 +44,14 @@ SYSTEM_PROMPT = """당신은 PC 집중 세션이 끝난 뒤 차단된 알림을 
 
 class SummaryResponseError(ValueError):
     """Raised when a model response violates the summary JSON contract."""
+
+
+@dataclass(frozen=True)
+class ParsedSummaryResponse:
+    """Validated summary lines plus whether a safe format repair was needed."""
+
+    summary_lines: tuple[str, ...]
+    format_repaired: bool
 
 
 def _required_text(data: Mapping[str, Any], field: str) -> str:
@@ -140,8 +149,12 @@ def build_messages(
     ]
 
 
-def parse_summary_response(raw_response: str) -> tuple[str, ...]:
-    """Parse and strictly validate the JSON returned by the model."""
+def parse_summary_response_with_metadata(
+    raw_response: str,
+    *,
+    allow_list_repair: bool = True,
+) -> ParsedSummaryResponse:
+    """Parse a response and optionally repair a bare top-level string array."""
 
     if not isinstance(raw_response, str) or not raw_response.strip():
         raise SummaryResponseError("model response must be a non-empty string")
@@ -158,12 +171,17 @@ def parse_summary_response(raw_response: str) -> tuple[str, ...]:
     except json.JSONDecodeError as exc:
         raise SummaryResponseError("model response is not valid JSON") from exc
 
-    if not isinstance(payload, dict) or set(payload) != {"summary_lines"}:
+    format_repaired = False
+    if isinstance(payload, list) and allow_list_repair:
+        summary_lines = payload
+        format_repaired = True
+    elif isinstance(payload, dict) and set(payload) == {"summary_lines"}:
+        summary_lines = payload["summary_lines"]
+    else:
         raise SummaryResponseError(
             "model response must contain only the summary_lines field"
         )
 
-    summary_lines = payload["summary_lines"]
     if not isinstance(summary_lines, list):
         raise SummaryResponseError("summary_lines must be an array")
     if not 1 <= len(summary_lines) <= MAX_SUMMARY_LINES:
@@ -179,4 +197,17 @@ def parse_summary_response(raw_response: str) -> tuple[str, ...]:
                 f"each summary line must be at most {MAX_LINE_LENGTH} characters"
             )
         normalized.append(text)
-    return tuple(normalized)
+    return ParsedSummaryResponse(tuple(normalized), format_repaired)
+
+
+def parse_summary_response(
+    raw_response: str,
+    *,
+    allow_list_repair: bool = True,
+) -> tuple[str, ...]:
+    """Return validated summary lines, repairing a safe bare-array variant."""
+
+    return parse_summary_response_with_metadata(
+        raw_response,
+        allow_list_repair=allow_list_repair,
+    ).summary_lines

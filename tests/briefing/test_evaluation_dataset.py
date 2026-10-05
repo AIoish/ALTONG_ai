@@ -144,6 +144,8 @@ class EvaluationDatasetTests(unittest.TestCase):
             "model": "Qwen/Qwen3-0.6B",
             "case_count": 1,
             "structured_output_rate": 1.0,
+            "raw_contract_compliance_rate": 0.0,
+            "format_repair_rate": 1.0,
             "case_pass_rate": 1.0,
             "fact_coverage": 1.0,
             "results": [
@@ -155,6 +157,7 @@ class EvaluationDatasetTests(unittest.TestCase):
                     "fact_total": 1,
                     "missing_expected_facts": [],
                     "line_limit_passed": True,
+                    "format_repaired": True,
                     "forbidden_phrase_hits": [],
                     "notifications": [
                         {
@@ -177,6 +180,8 @@ class EvaluationDatasetTests(unittest.TestCase):
         self.assertIn("### 사람 기준 요약", rendered)
         self.assertIn("### 모델 요약", rendered)
         self.assertIn("B강의실", rendered)
+        self.assertIn("원본 JSON 계약 준수율: 0.0", rendered)
+        self.assertIn("출력 형식 자동 보정: True", rendered)
 
 
 if __name__ == "__main__":
