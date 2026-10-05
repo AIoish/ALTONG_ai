@@ -780,6 +780,28 @@ COLLOQUIAL_SCENARIOS = (
 
 SCENARIOS = BASE_SCENARIOS + ADDITIONAL_SCENARIOS + COLLOQUIAL_SCENARIOS
 
+TARGETED_SCENARIO_NAMES = (
+    "appointment_cancelled",
+    "fragmented_schedule_chat",
+    "fragmented_task_chat",
+    "password_reset_completed",
+    "fragmented_colloquial_incident",
+    "fragmented_colloquial_task",
+    "fragmented_colloquial_schedule",
+    "fragmented_colloquial_security",
+    "fragmented_colloquial_appointment",
+    "fragmented_colloquial_delivery",
+    "fragmented_colloquial_promotion",
+    "fragmented_colloquial_notice",
+)
+TARGETED_SCENARIOS = tuple(
+    scenario for scenario in SCENARIOS
+    if scenario.name in TARGETED_SCENARIO_NAMES
+)
+
+if len(TARGETED_SCENARIOS) != len(TARGETED_SCENARIO_NAMES):
+    raise RuntimeError("a targeted fine-tuning scenario is not configured")
+
 
 def _context_for(split: str, index: int) -> dict[str, str]:
     start = date(2026, 10, 1) if split == "train" else date(2027, 4, 1)
@@ -851,6 +873,11 @@ def _apply_surface_style(
             "먼저 말씀드리면, ",
             "참고해 주세요. ",
             "추가 안내예요. ",
+            "이어서 알려드릴게요. ",
+            "변경된 내용을 공유해요. ",
+            "중요한 내용이에요. ",
+            "관련 안내 남길게요. ",
+            "마지막으로 확인해 주세요. ",
         )
         prefixes = train_prefixes if split == "train" else validation_prefixes
         return f"{prefixes[style_index % len(prefixes)]}{body}"
@@ -867,6 +894,11 @@ def _apply_surface_style(
         "관련 내용을 확인해 주세요. ",
         f"{sender} 공지입니다. ",
         "중요 내용을 전달드립니다. ",
+        "추가 정보를 전달드립니다. ",
+        f"{sender}의 변경 안내입니다. ",
+        "다음 내용을 꼭 확인해 주세요. ",
+        "최신 상태를 공유드립니다. ",
+        f"{sender}에서 추가로 안내합니다. ",
     )
     prefixes = train_prefixes if split == "train" else validation_prefixes
     return f"{prefixes[style_index % len(prefixes)]}{body}"
@@ -994,6 +1026,105 @@ def generate_balanced_records(split: str, total_count: int) -> list[dict[str, An
     return records
 
 
+def generate_targeted_records(
+    split: str,
+    total_count: int,
+    *,
+    existing_records: Sequence[Mapping[str, Any]] = (),
+) -> list[dict[str, Any]]:
+    """Generate held-out variants focused on observed summary failure modes."""
+
+    if total_count < 0:
+        raise ValueError("targeted total_count must not be negative")
+    if total_count == 0:
+        return []
+
+    fingerprints = {
+        normalized_body_fingerprint(record) for record in existing_records
+    }
+    scenario_base, scenario_remainder = divmod(
+        total_count, len(TARGETED_SCENARIOS)
+    )
+    records_by_scenario: list[list[dict[str, Any]]] = []
+    for scenario_index, scenario in enumerate(TARGETED_SCENARIOS):
+        scenario_count = scenario_base + (
+            scenario_index < scenario_remainder
+        )
+        scenario_records: list[dict[str, Any]] = []
+        candidate_index = 0
+        while len(scenario_records) < scenario_count:
+            if candidate_index >= 10_000:
+                raise ValueError(
+                    f"could not create {scenario_count} targeted records "
+                    f"for {scenario.name}"
+                )
+            record = build_record(scenario, split, candidate_index)
+            candidate_index += 1
+            fingerprint = normalized_body_fingerprint(record)
+            if fingerprint in fingerprints:
+                continue
+            fingerprints.add(fingerprint)
+            record["case_id"] = (
+                f"{split}_targeted_{scenario.name}_{candidate_index - 1:03d}"
+            )
+            record["metadata"]["augmentation"] = "failure_targeted"
+            scenario_records.append(record)
+        records_by_scenario.append(scenario_records)
+
+    records = [
+        scenario_records[record_index]
+        for record_index in range(max(map(len, records_by_scenario)))
+        for scenario_records in records_by_scenario
+        if record_index < len(scenario_records)
+    ]
+    validate_records(records, expected_split=split)
+    validate_normalized_diversity(records)
+    return records
+
+
+def _spread_targeted_records(
+    base_records: Sequence[dict[str, Any]],
+    targeted_records: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Distribute targeted examples across the generated JSONL deterministically."""
+
+    if not targeted_records:
+        return list(base_records)
+
+    combined: list[dict[str, Any]] = []
+    targeted_index = 0
+    for base_index, record in enumerate(base_records, start=1):
+        combined.append(record)
+        desired_count = (
+            base_index * len(targeted_records) // len(base_records)
+        )
+        while targeted_index < desired_count:
+            combined.append(targeted_records[targeted_index])
+            targeted_index += 1
+    combined.extend(targeted_records[targeted_index:])
+    return combined
+
+
+def generate_augmented_records(
+    split: str,
+    *,
+    base_count: int,
+    targeted_count: int,
+) -> list[dict[str, Any]]:
+    """Generate the balanced base plus failure-targeted augmentation."""
+
+    base_records = generate_balanced_records(split, base_count)
+    targeted_records = generate_targeted_records(
+        split,
+        targeted_count,
+        existing_records=base_records,
+    )
+    records = _spread_targeted_records(base_records, targeted_records)
+    validate_records(records, expected_split=split)
+    validate_normalized_diversity(records)
+    return records
+
+
 _DATE_PATTERN = re.compile(r"\d{1,2}월\s+\d{1,2}일")
 _TIME_PATTERN = re.compile(r"(?:오전|오후)\s+\d{1,2}시")
 
@@ -1107,6 +1238,8 @@ def main() -> None:
     )
     parser.add_argument("--train-count", type=int, default=1000)
     parser.add_argument("--validation-count", type=int, default=120)
+    parser.add_argument("--targeted-train-count", type=int, default=200)
+    parser.add_argument("--targeted-validation-count", type=int, default=40)
     parser.add_argument("--train-per-scenario", type=int)
     parser.add_argument("--validation-per-scenario", type=int)
     args = parser.parse_args()
@@ -1114,12 +1247,20 @@ def main() -> None:
     train_records = (
         generate_records("train", args.train_per_scenario)
         if args.train_per_scenario is not None
-        else generate_balanced_records("train", args.train_count)
+        else generate_augmented_records(
+            "train",
+            base_count=args.train_count,
+            targeted_count=args.targeted_train_count,
+        )
     )
     validation_records = (
         generate_records("validation", args.validation_per_scenario)
         if args.validation_per_scenario is not None
-        else generate_balanced_records("validation", args.validation_count)
+        else generate_augmented_records(
+            "validation",
+            base_count=args.validation_count,
+            targeted_count=args.targeted_validation_count,
+        )
     )
     write_jsonl(args.train_path, train_records)
     write_jsonl(args.validation_path, validation_records)

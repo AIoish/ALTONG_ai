@@ -6,7 +6,10 @@ from briefing_training.evaluate import (
     _render_review_markdown,
     validate_evaluation_cases,
 )
-from briefing_training.prepare_dataset import generate_balanced_records, generate_records
+from briefing_training.prepare_dataset import (
+    generate_augmented_records,
+    generate_records,
+)
 from briefing_training.smoke_test_model import load_cases
 from src.briefing.schema import FILTER_CATEGORIES
 
@@ -121,7 +124,11 @@ class EvaluationDatasetTests(unittest.TestCase):
 
         train_bodies = {
             notification["body"]
-            for record in generate_balanced_records("train", 1000)
+            for record in generate_augmented_records(
+                "train",
+                base_count=1000,
+                targeted_count=200,
+            )
             for notification in record["input"]["notifications"]
         }
         evaluation_bodies = {

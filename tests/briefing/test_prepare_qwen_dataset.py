@@ -4,7 +4,9 @@ import unittest
 
 from briefing_training.prepare_dataset import (
     SCENARIOS,
+    TARGETED_SCENARIO_NAMES,
     build_record,
+    generate_augmented_records,
     generate_balanced_records,
     generate_records,
     normalized_body_fingerprint,
@@ -20,15 +22,23 @@ class PrepareQwenDatasetTests(unittest.TestCase):
             set(FILTER_CATEGORIES),
         )
 
-    def test_default_scale_produces_1000_train_and_120_validation_cases(self) -> None:
-        train_records = generate_balanced_records("train", 1000)
-        validation_records = generate_balanced_records("validation", 120)
+    def test_default_scale_adds_targeted_train_and_validation_cases(self) -> None:
+        train_records = generate_augmented_records(
+            "train",
+            base_count=1000,
+            targeted_count=200,
+        )
+        validation_records = generate_augmented_records(
+            "validation",
+            base_count=120,
+            targeted_count=40,
+        )
 
-        self.assertEqual(len(train_records), 1000)
-        self.assertEqual(len(validation_records), 120)
+        self.assertEqual(len(train_records), 1200)
+        self.assertEqual(len(validation_records), 160)
         self.assertEqual(
             len({normalized_body_fingerprint(record) for record in train_records}),
-            1000,
+            1200,
         )
         self.assertEqual(
             len(
@@ -37,13 +47,41 @@ class PrepareQwenDatasetTests(unittest.TestCase):
                     for record in validation_records
                 }
             ),
-            120,
+            160,
         )
         self.assertTrue(
             {record["case_id"] for record in train_records}.isdisjoint(
                 record["case_id"] for record in validation_records
             )
         )
+        self.assertEqual(
+            sum(
+                record["metadata"].get("augmentation") == "failure_targeted"
+                for record in train_records
+            ),
+            200,
+        )
+        self.assertEqual(
+            sum(
+                record["metadata"].get("augmentation") == "failure_targeted"
+                for record in validation_records
+            ),
+            40,
+        )
+
+    def test_targeted_augmentation_covers_observed_failure_families(self) -> None:
+        records = generate_augmented_records(
+            "train",
+            base_count=80,
+            targeted_count=len(TARGETED_SCENARIO_NAMES),
+        )
+        targeted_scenarios = {
+            record["metadata"]["scenario"]
+            for record in records
+            if record["metadata"].get("augmentation") == "failure_targeted"
+        }
+
+        self.assertEqual(targeted_scenarios, set(TARGETED_SCENARIO_NAMES))
 
     def test_expanded_scenarios_balance_all_categories(self) -> None:
         scenario_counts = {

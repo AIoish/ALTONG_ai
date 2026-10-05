@@ -77,18 +77,22 @@ templates:
 python -m briefing_training.prepare_dataset
 ```
 
-The default command writes 1,000 training cases to `data/train_cases.jsonl` and
-120 validation cases to `data/validation_cases.jsonl`. The fixed 30-case
+The default command writes 1,200 training cases to `data/train_cases.jsonl` and
+160 validation cases to `data/validation_cases.jsonl`. This consists of a
+balanced 1,000/120 base plus 200/40 failure-targeted examples. The fixed 30-case
 `evaluation_cases.jsonl` file remains separate and must not be used for
 fine-tuning. The generator contains 32 scenario types, with four scenarios for
 each of the eight official filter categories. The 1,000 training cases are
-balanced at 125 cases per category. Validation cases use held-out entities and
-different dates from training. No real notifications or personal data are
-included. The fragmented-chat scenarios use four sequential notification IDs
-at one-minute intervals so that separate short messages contribute different
-facts to one summary. Of the training cases, 248 specifically use colloquial
-sentence fragments such as "that one," "you know," and omitted predicates;
-another 248 use more complete but still fragmented multi-message conversations.
+balanced at 125 cases per category. The targeted examples emphasize final-state
+completion, named entities, places, deadlines, purposes, and natural summaries
+of facts spread across short messages. Validation cases use held-out entities,
+different dates, and validation-only surface forms. No real notifications or
+personal data are included. The fragmented-chat scenarios use sequential
+notification IDs at one-minute intervals so that separate short messages
+contribute different facts to one summary. Of the base training cases, 248
+specifically use colloquial sentence fragments such as "that one," "you know,"
+and omitted predicates; another 248 use more complete but still fragmented
+multi-message conversations.
 Other scenarios cover recovery, rollback, failover,
 completion, cancellation, correction, security response, payment, travel,
 delivery, refund, subscription, promotion, maintenance, and lost-property
@@ -100,7 +104,11 @@ identical after IDs, dates, and times are ignored.
 To create a smaller temporary dataset, override the exact record counts:
 
 ```powershell
-python -m briefing_training.prepare_dataset --train-count 240 --validation-count 48
+python -m briefing_training.prepare_dataset `
+  --train-count 240 `
+  --validation-count 48 `
+  --targeted-train-count 48 `
+  --targeted-validation-count 16
 ```
 
 Validate the generated fine-tuning records without loading a model:
