@@ -135,6 +135,18 @@ is not truncated after the Korean prompt. The base model remains unchanged.
 Training outputs must stay in Google Drive or the ignored local `outputs`
 directory and must not be committed to Git.
 
+If a Colab runtime stops after saving a checkpoint, continue from that exact
+checkpoint instead of restarting all epochs:
+
+```powershell
+python -m briefing_training.train_lora `
+  --output-dir /content/drive/MyDrive/ALTONG_models/briefing-qwen-lora `
+  --resume-from-checkpoint /content/drive/MyDrive/ALTONG_models/briefing-qwen-lora/checkpoint-150
+```
+
+Use the same output directory and training options as the interrupted run.
+The checkpoint restores the adapter, optimizer, scheduler, and training step.
+
 ## Evaluate a trained adapter
 
 Run the same fixed evaluation set with the saved adapter and optionally write

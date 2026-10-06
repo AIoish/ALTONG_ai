@@ -71,6 +71,20 @@ def validate_split_separation(
         )
 
 
+def validate_resume_checkpoint(path: Path | None) -> Path | None:
+    """Validate a Trainer checkpoint before loading the model and datasets."""
+    if path is None:
+        return None
+    checkpoint = path.expanduser().resolve()
+    if not checkpoint.is_dir():
+        raise ValueError(f"resume checkpoint directory does not exist: {path}")
+    if not (checkpoint / "trainer_state.json").is_file():
+        raise ValueError(
+            f"resume checkpoint is missing trainer_state.json: {checkpoint}"
+        )
+    return checkpoint
+
+
 def to_prompt_completion(record: Mapping[str, Any]) -> dict[str, Any]:
     messages = training_messages(record)
     prompt = [dict(message) for message in messages[:-1]]
@@ -114,6 +128,7 @@ def train(
     gradient_accumulation_steps: int,
     learning_rate: float,
     max_length: int,
+    resume_from_checkpoint: Path | None = None,
 ) -> None:
     import torch
     from peft import LoraConfig
@@ -185,7 +200,11 @@ def train(
         peft_config=peft_config,
     )
     trainer.model.print_trainable_parameters()
-    result = trainer.train()
+    result = trainer.train(
+        resume_from_checkpoint=(
+            str(resume_from_checkpoint) if resume_from_checkpoint else None
+        )
+    )
     trainer.save_model(str(output_directory))
     tokenizer.save_pretrained(output_directory)
     trainer.save_metrics("train", result.metrics)
@@ -206,6 +225,11 @@ def main() -> None:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--max-length", type=int, default=2048)
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        type=Path,
+        help="resume optimizer, scheduler, and model state from a Trainer checkpoint",
+    )
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
 
@@ -221,6 +245,10 @@ def main() -> None:
     if args.validate_only:
         return
 
+    resume_from_checkpoint = validate_resume_checkpoint(
+        args.resume_from_checkpoint
+    )
+
     train(
         train_path=args.train_path,
         validation_path=args.validation_path,
@@ -230,6 +258,7 @@ def main() -> None:
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         max_length=args.max_length,
+        resume_from_checkpoint=resume_from_checkpoint,
     )
 
 
