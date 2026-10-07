@@ -136,9 +136,9 @@ class SQLiteBriefingAdapterTests(unittest.TestCase):
             session_id=source.session_id,
             notifications=source.notifications,
             filter_results=source.filter_results,
-        ).to_dict()
-        self.assertEqual(briefing["blocked_notification_count"], 1)
-        self.assertEqual(briefing["groups"][0]["primary_category"], "긴급 업무")
+        )
+        self.assertEqual(sum(len(group.notification_ids) for group in briefing.groups), 1)
+        self.assertEqual(briefing.to_dict()["groups"][0]["primary_category"], "긴급 업무")
 
     def test_load_session_uses_only_unassigned_rows_inside_focus_period(self) -> None:
         self._insert_focus_session("session_1")

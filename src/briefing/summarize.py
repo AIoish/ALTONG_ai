@@ -45,15 +45,8 @@ class RuleBasedBriefingProvider:
             return ()
 
         ordered = sorted(items, key=lambda item: item.notification.timestamp)
-        most_important = max(
-            ordered,
-            key=lambda item: (
-                item.filter_result.urgency_score,
-                item.filter_result.relevance_score,
-                item.notification.timestamp,
-            ),
-        )
-        selected = (ordered[0], most_important, ordered[-1])
+        # Preserve context and the latest updates without filtering scores.
+        selected = (ordered[0], *ordered[-2:])
 
         lines: list[str] = []
         selected_ids: set[str] = set()

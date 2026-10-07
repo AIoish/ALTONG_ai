@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 import hashlib
 import json
 from typing import Any, Iterable, Mapping
 
 from .action_items import (
     ActionItemProvider,
-    CandidateExtraction,
     RuleBasedActionItemProvider,
-    merge_candidates,
 )
 from .clustering import RuleGroup, group_items, representative_keywords
 from .schema import (
@@ -20,7 +19,6 @@ from .schema import (
     ContractValidationError,
     FilterResult,
     RawNotification,
-    ScoreAggregate,
     SessionBriefing,
 )
 from .summarize import (
@@ -29,14 +27,6 @@ from .summarize import (
     RuleBasedBriefingProvider,
     RuleBasedCategoryProvider,
 )
-
-
-def _aggregate(values: list[int]) -> ScoreAggregate:
-    return ScoreAggregate(
-        minimum=min(values),
-        maximum=max(values),
-        average=round(sum(values) / len(values), 2),
-    )
 
 
 def _fingerprint(notification: RawNotification) -> tuple[str, ...]:
@@ -106,17 +96,17 @@ class SessionBriefingService:
 
         rule_groups = group_items(blocked)
         groups: list[BriefingGroup] = []
-        extractions: list[CandidateExtraction] = []
         for rule_group in rule_groups:
             briefing_group = self._build_group(rule_group)
-            groups.append(briefing_group)
-            extractions.append(
-                self._action_item_provider.extract(
-                    group_id=briefing_group.group_id,
-                    items=rule_group.items,
-                )
+            extraction = self._action_item_provider.extract(
+                group_id=briefing_group.group_id,
+                items=rule_group.items,
             )
-        candidates = merge_candidates(extractions)
+            groups.append(replace(
+                briefing_group,
+                session_id=session_id.strip(),
+                schedule_summaries=extraction.schedules,
+            ))
         timestamp = generated_at or datetime.now(timezone.utc)
         return SessionBriefing(
             session_id=session_id.strip(),
@@ -125,9 +115,6 @@ class SessionBriefingService:
             blocked_notification_count=len(blocked),
             duplicate_count=duplicate_count,
             groups=tuple(groups),
-            todo_candidates=candidates.todos,
-            calendar_candidates=candidates.calendar,
-            schedule_summaries=candidates.schedules,
         )
 
     def build_json(self, **kwargs: Any) -> str:
@@ -147,8 +134,6 @@ class SessionBriefingService:
 
     def _build_group(self, group: RuleGroup) -> BriefingGroup:
         first = group.items[0].notification
-        urgency_values = [item.filter_result.urgency_score for item in group.items]
-        relevance_values = [item.filter_result.relevance_score for item in group.items]
         category = self._category_provider.categorize(group.items)
         return BriefingGroup(
             group_id=_group_id(group),
@@ -159,7 +144,5 @@ class SessionBriefingService:
             category_evidence_notification_ids=category.evidence_notification_ids,
             notification_ids=tuple(item.notification.id for item in group.items),
             keywords=representative_keywords(group),
-            urgency=_aggregate(urgency_values),
-            relevance=_aggregate(relevance_values),
             summary_lines=self._provider.summarize(group.items),
         )

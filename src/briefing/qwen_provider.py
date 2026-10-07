@@ -120,24 +120,13 @@ def build_group_context(items: Sequence[BriefingItem]) -> dict[str, object]:
         raise ValueError("cannot summarize an empty briefing group")
 
     ordered = sorted(items, key=lambda item: item.notification.timestamp)
-    urgency_values = [item.filter_result.urgency_score for item in ordered]
-    relevance_values = [item.filter_result.relevance_score for item in ordered]
     category = categorize_group(list(ordered)).primary_category
     first = ordered[0].notification
-
-    def score(values: list[int]) -> dict[str, int | float]:
-        return {
-            "min": min(values),
-            "max": max(values),
-            "average": round(sum(values) / len(values), 2),
-        }
 
     return {
         "app_name": first.app_name,
         "sender": first.sender,
         "category": category,
-        "urgency_score": score(urgency_values),
-        "relevance_score": score(relevance_values),
         "notifications": [
             {
                 "id": item.notification.id,

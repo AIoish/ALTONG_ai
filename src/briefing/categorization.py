@@ -17,8 +17,7 @@ def categorize_group(items: list[BriefingItem]) -> CategoryDecision:
     """Choose a primary category after grouping all related notifications.
 
     Each notification has one vote.  Ties prefer the category of the latest
-    notification so a later update can influence the final state.  Urgency and
-    relevance remain separate signals and never redefine semantic category.
+    notification so a later update can influence the final state.
     """
 
     if not items:

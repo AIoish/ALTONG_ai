@@ -1,4 +1,4 @@
-"""Deterministic To-Do and calendar candidate extraction for the MVP.
+"""Deterministic schedule extraction for dashboard briefing cards.
 
 The rules deliberately favor traceable candidates over aggressive extraction.
 This provider can later be replaced by an LLM-backed implementation without
@@ -16,29 +16,12 @@ import unicodedata
 
 from .schema import (
     BriefingItem,
-    CalendarCandidate,
     ScheduleDetails,
     ScheduleSummary,
-    TodoCandidate,
     format_timestamp,
 )
 
 
-_TODO_CUES = (
-    "해 주세요",
-    "해주세요",
-    "부탁",
-    "필요",
-    "해야",
-    "제출",
-    "확인",
-    "수정",
-    "작성",
-    "전달",
-    "완료",
-    "재시도",
-    "등록",
-)
 _CALENDAR_CUES = (
     "회의",
     "일정",
@@ -54,6 +37,7 @@ _CALENDAR_CUES = (
     "행사",
     "제출",
 )
+_SCHEDULE_TIMEZONE = timezone(timedelta(hours=9), name="Asia/Seoul")
 _RELATIVE_DAYS = {"오늘": 0, "내일": 1, "모레": 2}
 _DATE_PATTERN = re.compile(
     r"(?:(?P<year>\d{4})\s*(?:년|[./-])\s*)?"
@@ -119,9 +103,7 @@ _RESCHEDULED_CUES = ("재개", "다시 진행", "재예정")
 
 
 @dataclass(frozen=True, slots=True)
-class CandidateExtraction:
-    todos: tuple[TodoCandidate, ...] = ()
-    calendar: tuple[CalendarCandidate, ...] = ()
+class ScheduleExtraction:
     schedules: tuple[ScheduleSummary, ...] = ()
 
 
@@ -132,14 +114,14 @@ class _TemporalMatch:
 
 
 class ActionItemProvider(Protocol):
-    """Replaceable boundary for To-Do and calendar candidate extraction."""
+    """Replaceable boundary for schedule extraction; no calendar writes."""
 
     def extract(
         self,
         *,
         group_id: str,
         items: Sequence[BriefingItem],
-    ) -> CandidateExtraction: ...
+    ) -> ScheduleExtraction: ...
 
 
 def _normalize(value: str) -> str:
@@ -151,39 +133,9 @@ def _candidate_id(kind: str, key: str) -> str:
     return f"{kind}_{digest}"
 
 
-def _display_text(item: BriefingItem) -> str:
-    notification = item.notification
-    text = f"{notification.title} — {notification.body}".strip()
-    if len(text) > 240:
-        return f"{text[:237].rstrip()}..."
-    return text
-
-
 def _matched_cues(text: str, cues: tuple[str, ...]) -> tuple[str, ...]:
     normalized = _normalize(text)
     return tuple(cue for cue in cues if cue in normalized)
-
-
-def _parse_time(text: str) -> tuple[int, int] | None:
-    ampm_match = _AMPM_TIME_PATTERN.search(text)
-    if ampm_match:
-        hour = int(ampm_match.group("hour"))
-        if not 1 <= hour <= 12:
-            return None
-        if ampm_match.group("ampm") == "오전":
-            hour = 0 if hour == 12 else hour
-        else:
-            hour = 12 if hour == 12 else hour + 12
-        return hour, int(ampm_match.group("minute") or 0)
-
-    colon_match = _COLON_TIME_PATTERN.search(text)
-    if colon_match:
-        return int(colon_match.group("hour")), int(colon_match.group("minute"))
-
-    hour_match = _HOUR_TIME_PATTERN.search(text)
-    if hour_match:
-        return int(hour_match.group("hour")), int(hour_match.group("minute") or 0)
-    return None
 
 
 def _parse_last_time(text: str) -> tuple[int, int] | None:
@@ -223,32 +175,6 @@ def _parse_last_time(text: str) -> tuple[int, int] | None:
     return hour, minute
 
 
-def _parse_temporal(text: str, base: datetime) -> _TemporalMatch | None:
-    base_utc = base.astimezone(timezone.utc)
-    date_match = _DATE_PATTERN.search(text)
-    relative_match = next((word for word in _RELATIVE_DAYS if word in text), None)
-    parsed_time = _parse_time(text)
-
-    if date_match:
-        year = int(date_match.group("year") or base_utc.year)
-        month = int(date_match.group("month"))
-        day = int(date_match.group("day"))
-    elif relative_match:
-        relative_date = base_utc.date() + timedelta(days=_RELATIVE_DAYS[relative_match])
-        year, month, day = relative_date.year, relative_date.month, relative_date.day
-    elif parsed_time:
-        year, month, day = base_utc.year, base_utc.month, base_utc.day
-    else:
-        return None
-
-    hour, minute = parsed_time or (0, 0)
-    try:
-        value = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-    except ValueError:
-        return None
-    return _TemporalMatch(value=value, is_all_day=parsed_time is None)
-
-
 def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | None:
     """Combine a date and time that may be split across adjacent messages."""
 
@@ -259,7 +185,7 @@ def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | Non
     for item in items:
         notification = item.notification
         text = f"{notification.title} {notification.body}"
-        base = notification.timestamp.astimezone(timezone.utc)
+        base = notification.timestamp.astimezone(_SCHEDULE_TIMEZONE)
         date_matches = list(_DATE_PATTERN.finditer(text))
         date_match = date_matches[-1] if date_matches else None
         relative_positions = [
@@ -303,7 +229,9 @@ def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | Non
 
     hour, minute = latest_time or (0, 0)
     try:
-        value = datetime(*latest_date, hour, minute, tzinfo=timezone.utc)
+        value = datetime(
+            *latest_date, hour, minute, tzinfo=_SCHEDULE_TIMEZONE
+        ).astimezone(timezone.utc)
     except ValueError:
         return None
     return _TemporalMatch(value=value, is_all_day=latest_time is None)
@@ -387,7 +315,11 @@ def _schedule_details(
         where = _extract_detail(_NATURAL_WHERE_PATTERN, combined)
     return ScheduleDetails(
         who=who,
-        when=format_timestamp(temporal.value) if temporal else None,
+        when=(
+            temporal.value.astimezone(_SCHEDULE_TIMEZONE).date().isoformat()
+            if temporal and temporal.is_all_day
+            else format_timestamp(temporal.value) if temporal else None
+        ),
         where=where,
         what=what or title,
         why=why,
@@ -396,189 +328,36 @@ def _schedule_details(
 
 
 class RuleBasedActionItemProvider:
-    """Extract conservative, source-grounded candidates from blocked items."""
+    """Extract schedule details without creating tasks or registering events."""
 
     def extract(
         self,
         *,
         group_id: str,
         items: Sequence[BriefingItem],
-    ) -> CandidateExtraction:
-        todos: list[TodoCandidate] = []
-
-        for item in items:
-            notification = item.notification
-            source_text = f"{notification.title} {notification.body}"
-            temporal = _parse_temporal(source_text, notification.timestamp)
-            todo_cues = _matched_cues(source_text, _TODO_CUES)
-
-            if todo_cues:
-                text = _display_text(item)
-                temporal_key = temporal.value.isoformat() if temporal else "no-due-date"
-                key = f"{_normalize(text)}|{temporal_key}"
-                todos.append(
-                    TodoCandidate(
-                        candidate_id=_candidate_id("todo", key),
-                        text=text,
-                        due_at=temporal.value if temporal else None,
-                        is_all_day=temporal.is_all_day if temporal else False,
-                        source_notification_ids=(notification.id,),
-                        source_group_ids=(group_id,),
-                        matched_cues=todo_cues,
-                    )
-                )
-
+    ) -> ScheduleExtraction:
         ordered = tuple(sorted(items, key=lambda item: item.notification.timestamp))
+        if not ordered:
+            return ScheduleExtraction()
         combined_text = " ".join(
             f"{item.notification.title} {item.notification.body}" for item in ordered
         )
+        is_schedule = bool(_matched_cues(combined_text, _CALENDAR_CUES)) or any(
+            item.filter_result.category == "일정/회의" for item in ordered
+        )
+        if not is_schedule:
+            return ScheduleExtraction()
+
         temporal = _parse_group_temporal(ordered)
-        calendar_cues = _matched_cues(combined_text, _CALENDAR_CUES)
-        if any(item.filter_result.category == "일정/회의" for item in ordered):
-            calendar_cues = tuple(dict.fromkeys((*calendar_cues, "일정/회의")))
-        calendar: tuple[CalendarCandidate, ...] = ()
-        schedules: tuple[ScheduleSummary, ...] = ()
-        if calendar_cues:
-            title = _calendar_title(ordered)
-            details = _schedule_details(ordered, title=title, temporal=temporal)
-            status = _calendar_status(ordered)
-            source_ids = tuple(item.notification.id for item in ordered)
-            schedules = (
-                ScheduleSummary(
-                    summary_id=_candidate_id("schedule", group_id),
-                    title=title,
-                    status=status,
-                    schedule_details=details,
-                    source_notification_ids=source_ids,
-                    source_group_ids=(group_id,),
-                ),
-            )
-            if temporal:
-                first = ordered[0].notification
-                key = "|".join(
-                    (
-                        _normalize(first.app_name),
-                        _normalize(first.sender),
-                        _normalize(title),
-                        temporal.value.isoformat(),
-                    )
-                )
-                calendar = (
-                    CalendarCandidate(
-                        candidate_id=_candidate_id("calendar", key),
-                        title=title,
-                        scheduled_at=temporal.value,
-                        is_all_day=temporal.is_all_day,
-                        status=status,
-                        schedule_details=details,
-                        source_notification_ids=source_ids,
-                        source_group_ids=(group_id,),
-                        matched_cues=calendar_cues,
-                    ),
-                )
-
-        return CandidateExtraction(
-            todos=tuple(todos),
-            calendar=calendar,
-            schedules=schedules,
+        title = _calendar_title(ordered)
+        summary = ScheduleSummary(
+            summary_id=_candidate_id("schedule", group_id),
+            title=title,
+            status=_calendar_status(ordered),
+            schedule_details=_schedule_details(ordered, title=title, temporal=temporal),
+            source_notification_ids=tuple(item.notification.id for item in ordered),
+            source_group_ids=(group_id,),
+            is_all_day=temporal.is_all_day if temporal else None,
         )
-
-
-def merge_candidates(
-    extractions: Sequence[CandidateExtraction],
-) -> CandidateExtraction:
-    """Merge repeated candidates while preserving every source reference."""
-
-    todos: dict[str, TodoCandidate] = {}
-    calendar: dict[str, CalendarCandidate] = {}
-    schedules: dict[str, ScheduleSummary] = {}
-
-    for extraction in extractions:
-        for candidate in extraction.todos:
-            existing = todos.get(candidate.candidate_id)
-            if existing is None:
-                todos[candidate.candidate_id] = candidate
-                continue
-            todos[candidate.candidate_id] = TodoCandidate(
-                candidate_id=existing.candidate_id,
-                text=existing.text,
-                due_at=existing.due_at or candidate.due_at,
-                is_all_day=existing.is_all_day or candidate.is_all_day,
-                source_notification_ids=tuple(
-                    sorted(
-                        set(
-                            existing.source_notification_ids
-                            + candidate.source_notification_ids
-                        )
-                    )
-                ),
-                source_group_ids=tuple(
-                    sorted(set(existing.source_group_ids + candidate.source_group_ids))
-                ),
-                matched_cues=tuple(
-                    sorted(set(existing.matched_cues + candidate.matched_cues))
-                ),
-            )
-
-        for candidate in extraction.calendar:
-            existing = calendar.get(candidate.candidate_id)
-            if existing is None:
-                calendar[candidate.candidate_id] = candidate
-                continue
-            calendar[candidate.candidate_id] = CalendarCandidate(
-                candidate_id=existing.candidate_id,
-                title=existing.title,
-                scheduled_at=existing.scheduled_at,
-                is_all_day=existing.is_all_day,
-                status=candidate.status,
-                schedule_details=ScheduleDetails(
-                    who=candidate.schedule_details.who or existing.schedule_details.who,
-                    when=candidate.schedule_details.when or existing.schedule_details.when,
-                    where=(
-                        candidate.schedule_details.where
-                        or existing.schedule_details.where
-                    ),
-                    what=candidate.schedule_details.what or existing.schedule_details.what,
-                    why=candidate.schedule_details.why or existing.schedule_details.why,
-                    how=candidate.schedule_details.how or existing.schedule_details.how,
-                ),
-                source_notification_ids=tuple(
-                    sorted(
-                        set(
-                            existing.source_notification_ids
-                            + candidate.source_notification_ids
-                        )
-                    )
-                ),
-                source_group_ids=tuple(
-                    sorted(set(existing.source_group_ids + candidate.source_group_ids))
-                ),
-                matched_cues=tuple(
-                    sorted(set(existing.matched_cues + candidate.matched_cues))
-                ),
-            )
-
-        for summary in extraction.schedules:
-            schedules[summary.summary_id] = summary
-
-    todo_values = tuple(
-        sorted(
-            todos.values(),
-            key=lambda candidate: (
-                candidate.due_at is None,
-                candidate.due_at or datetime.max.replace(tzinfo=timezone.utc),
-                candidate.text,
-            ),
-        )
-    )
-    calendar_values = tuple(
-        sorted(
-            calendar.values(),
-            key=lambda candidate: (candidate.scheduled_at, candidate.title),
-        )
-    )
-    return CandidateExtraction(
-        todos=todo_values,
-        calendar=calendar_values,
-        schedules=tuple(schedules.values()),
-    )
+        # Registration status stays unknown until a calendar owner confirms it.
+        return ScheduleExtraction(schedules=(summary,))

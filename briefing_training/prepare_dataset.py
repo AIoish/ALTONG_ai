@@ -34,8 +34,6 @@ class Scenario:
     notifications: tuple[NotificationTemplate, ...]
     target_lines: tuple[str, ...]
     max_summary_lines: int
-    urgency: tuple[int, int, float]
-    relevance: tuple[int, int, float]
 
 
 BASE_SCENARIOS = (
@@ -55,8 +53,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{subject} 장애가 복구되어 정상화되었습니다.",),
         max_summary_lines=1,
-        urgency=(4, 5, 4.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="task_completed",
@@ -74,8 +70,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{subject}를 {place}에 업로드했습니다.",),
         max_summary_lines=1,
-        urgency=(2, 3, 2.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="meeting_cancelled",
@@ -93,8 +87,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{date} {time} {subject}가 취소되었습니다.",),
         max_summary_lines=1,
-        urgency=(2, 4, 3.0),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="security_login",
@@ -115,8 +107,6 @@ BASE_SCENARIOS = (
             "본인이 아니라면 즉시 비밀번호를 변경해야 합니다.",
         ),
         max_summary_lines=2,
-        urgency=(5, 5, 5.0),
-        relevance=(5, 5, 5.0),
     ),
     Scenario(
         name="appointment_cancelled",
@@ -134,8 +124,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{date} {time} {subject} 예약이 취소되었습니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="delivery_completed",
@@ -153,8 +141,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("배송 물품 {subject}이 {place}에 도착했습니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 3, 2.5),
     ),
     Scenario(
         name="promotion_extended",
@@ -172,8 +158,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{subject}이 {new_date}까지 연장되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(1, 3, 2.0),
     ),
     Scenario(
         name="notice_corrected",
@@ -191,8 +175,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{subject} 장소가 {place}로 정정되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 3, 2.0),
-        relevance=(2, 4, 3.0),
     ),
     Scenario(
         name="deadline_extended",
@@ -210,8 +192,6 @@ BASE_SCENARIOS = (
         ),
         target_lines=("{subject} 제출 기한이 {new_date} {time}로 연장되었습니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="submission_details",
@@ -232,8 +212,6 @@ BASE_SCENARIOS = (
             "{artifact}를 함께 제출해야 합니다.",
         ),
         max_summary_lines=2,
-        urgency=(3, 4, 3.5),
-        relevance=(5, 5, 5.0),
     ),
     Scenario(
         name="fragmented_schedule_chat",
@@ -300,8 +278,6 @@ BASE_SCENARIOS = (
             "진행 이유는 {reason}이고 {method} 방식입니다.",
         ),
         max_summary_lines=2,
-        urgency=(2, 4, 3.0),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_task_chat",
@@ -354,8 +330,6 @@ BASE_SCENARIOS = (
             "필요 자료는 {artifact}이며 업로드 위치는 {place}입니다.",
         ),
         max_summary_lines=2,
-        urgency=(2, 4, 3.0),
-        relevance=(4, 5, 4.5),
     ),
 )
 
@@ -379,8 +353,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 배포가 실패해 이전 버전으로 롤백하고 있습니다.",),
         max_summary_lines=1,
-        urgency=(4, 5, 4.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="database_failover",
@@ -398,8 +370,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject}를 대기 장비로 전환해 연결을 복구했습니다.",),
         max_summary_lines=1,
-        urgency=(4, 5, 4.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_suspicious_device_blocked",
@@ -422,8 +392,6 @@ ADDITIONAL_SCENARIOS = (
             "해당 기기를 차단하고 모든 로그인 세션을 종료했습니다.",
         ),
         max_summary_lines=2,
-        urgency=(5, 5, 5.0),
-        relevance=(5, 5, 5.0),
     ),
     Scenario(
         name="password_reset_completed",
@@ -441,8 +409,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 비밀번호 변경이 완료되어 기존 세션이 종료되었습니다.",),
         max_summary_lines=1,
-        urgency=(4, 5, 4.5),
-        relevance=(5, 5, 5.0),
     ),
     Scenario(
         name="payment_due",
@@ -460,8 +426,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 자동 납부는 {date} {time}에 등록 계좌에서 진행될 예정입니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_travel_schedule_changed",
@@ -481,8 +445,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 출발 일정은 {date} {time}이며 탑승 장소는 {place}입니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="refund_completed",
@@ -500,8 +462,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 결제 취소와 환불 처리가 완료되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 4, 3.0),
     ),
     Scenario(
         name="fragmented_subscription_renewal",
@@ -521,8 +481,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 자동 갱신은 {date}이며 결제 수단을 확인해야 합니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 3, 2.5),
     ),
     Scenario(
         name="fragmented_coupon_expiring",
@@ -542,8 +500,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject}은 {date}에 만료됩니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(1, 3, 2.0),
     ),
     Scenario(
         name="promotion_started",
@@ -561,8 +517,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 행사가 {date}까지 진행됩니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(1, 3, 2.0),
     ),
     Scenario(
         name="fragmented_maintenance_rescheduled",
@@ -582,8 +536,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("{subject} 일정이 {new_date} {time}로 변경되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 3, 2.0),
-        relevance=(2, 4, 3.0),
     ),
     Scenario(
         name="lost_found_notice",
@@ -601,8 +553,6 @@ ADDITIONAL_SCENARIOS = (
         ),
         target_lines=("발견된 {subject}은 {place}에 보관 중입니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 3, 2.5),
     ),
 )
 
@@ -626,8 +576,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("{subject}에 문제가 발생해 {action} 중입니다.",),
         max_summary_lines=1,
-        urgency=(4, 5, 4.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_colloquial_task",
@@ -647,8 +595,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("{subject}에서 {artifact} 관련 내용을 수정해 {date} {time}까지 {place}에 다시 올려야 합니다.",),
         max_summary_lines=1,
-        urgency=(2, 4, 3.0),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_colloquial_schedule",
@@ -668,8 +614,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("{subject}가 {date} {time}로 변경되었으며 장소는 기존과 동일한 {place}입니다.",),
         max_summary_lines=1,
-        urgency=(2, 4, 3.0),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_colloquial_security",
@@ -689,8 +633,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("{place}의 {device}에서 발생한 {subject} 로그인을 본인 활동이 아닌 것으로 확인해 기기를 차단하고 로그아웃 처리했습니다.",),
         max_summary_lines=1,
-        urgency=(5, 5, 5.0),
-        relevance=(5, 5, 5.0),
     ),
     Scenario(
         name="fragmented_colloquial_appointment",
@@ -710,8 +652,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("{subject} 예약이 {date} {time}로 변경되었으며 {place}로 방문해야 합니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="fragmented_colloquial_delivery",
@@ -730,8 +670,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("주문한 {subject}이 {place}에 배송 완료되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 3, 2.5),
     ),
     Scenario(
         name="fragmented_colloquial_promotion",
@@ -751,8 +689,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("사용하지 않은 {subject}은 {date}에 만료됩니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(1, 3, 2.0),
     ),
     Scenario(
         name="fragmented_colloquial_notice",
@@ -772,8 +708,6 @@ COLLOQUIAL_SCENARIOS = (
         ),
         target_lines=("발견된 {subject}은 {place}에 보관 중이므로 해당 장소에서 찾아가야 합니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 3, 2.5),
     ),
 )
 
@@ -904,11 +838,6 @@ def _apply_surface_style(
     return f"{prefixes[style_index % len(prefixes)]}{body}"
 
 
-def _score(values: tuple[int, int, float]) -> dict[str, int | float]:
-    minimum, maximum, average = values
-    return {"min": minimum, "max": maximum, "average": average}
-
-
 def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
     if split not in {"train", "validation"}:
         raise ValueError("split must be train or validation")
@@ -942,8 +871,6 @@ def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
             "app_name": values["app"],
             "sender": values["sender"],
             "category": scenario.category,
-            "urgency_score": _score(scenario.urgency),
-            "relevance_score": _score(scenario.relevance),
             "notifications": notifications,
         },
         "max_summary_lines": scenario.max_summary_lines,

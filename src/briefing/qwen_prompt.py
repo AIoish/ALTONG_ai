@@ -20,7 +20,7 @@ SYSTEM_PROMPT = """당신은 PC 집중 세션이 끝난 뒤 차단된 알림을 
 4. 변경, 취소, 복구, 완료처럼 상태가 달라졌다면 마지막 알림의 상태를 우선하세요.
    이미 취소되거나 바뀐 이전 일정과 상태는 최종 요약에서 제외하세요.
 5. 뒤 알림이 앞 알림을 취소하거나 변경한 것이 아니라 새로운 정보를 보탠 경우에는 두 알림의 핵심 사실을 모두 보존하세요.
-6. 긴급도와 연관도가 높은 내용을 먼저 쓰세요.
+6. 사용자가 알아야 할 핵심 사실과 최신 상태를 우선해서 쓰세요.
 7. 제목만 나열하지 말고 본문에 있는 핵심 사실을 포함하세요.
 8. 일정과 제출 알림은 날짜, 시간, 제출물 등 사용자가 행동하는 데 필요한 정보를 보존하세요.
 9. 각 줄은 알림 표시나 필드 이름 없이 그 자체로 이해되는 완전한 문장이어야 합니다.
@@ -59,15 +59,6 @@ def _required_text(data: Mapping[str, Any], field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
-
-
-def _score_text(value: object) -> str:
-    if isinstance(value, Mapping):
-        minimum = value.get("min")
-        maximum = value.get("max")
-        average = value.get("average")
-        return f"min={minimum}, max={maximum}, average={average}"
-    return str(value)
 
 
 def _validate_max_summary_lines(max_summary_lines: int) -> int:
@@ -138,8 +129,6 @@ def build_messages(
         "app_name": _required_text(group, "app_name"),
         "sender": _required_text(group, "sender"),
         "category": _required_text(group, "category"),
-        "urgency_score": _score_text(group.get("urgency_score")),
-        "relevance_score": _score_text(group.get("relevance_score")),
         "notifications_oldest_to_newest": notification_records,
     }
     user_prompt = _build_user_prompt(group_context, max_summary_lines)
