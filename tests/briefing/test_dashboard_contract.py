@@ -15,7 +15,7 @@ CARD_FIELDS = {
     "summary_lines", "schedule_summaries",
 }
 SCHEDULE_FIELDS = {
-    "summary_id", "status", "schedule_status", "is_all_day",
+    "summary_id", "schedule_status", "is_all_day",
     "who", "when", "where", "what", "why", "how",
 }
 
@@ -29,7 +29,7 @@ class DashboardContractTests(unittest.TestCase):
             for schedule in card["schedule_summaries"]:
                 self.assertEqual(set(schedule), SCHEDULE_FIELDS)
                 self.assertNotIn("schedule_details", schedule)
-                self.assertIsNone(schedule["status"])
+                self.assertNotIn("status", schedule)
 
     def test_readme_example_matches_real_pipeline_serialization(self) -> None:
         markdown = (ROOT / "README.md").read_text(encoding="utf-8")

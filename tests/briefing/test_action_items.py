@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timezone
 import unittest
 
 from briefing_training.evaluate import load_cases
 from src.briefing.pipeline import SessionBriefingService
-from src.briefing.schema import ContractValidationError
 
 
 def notification(
@@ -77,10 +75,10 @@ class ActionItemExtractionTests(unittest.TestCase):
         self.assertEqual(summary["when"], "2026-09-20T06:00:00Z")
         self.assertFalse(summary["is_all_day"])
         self.assertEqual(summary["schedule_status"], "scheduled")
-        self.assertIsNone(summary["status"])
+        self.assertNotIn("status", summary)
         self.assertEqual(summary["what"], "프로젝트 회의 일정")
         self.assertEqual(set(summary), {
-            "summary_id", "status", "schedule_status", "is_all_day",
+            "summary_id", "schedule_status", "is_all_day",
             "who", "when", "where", "what", "why", "how",
         })
 
@@ -153,7 +151,7 @@ class ActionItemExtractionTests(unittest.TestCase):
         ])[0]
         self.assertEqual(summary["when"], "2026-09-21T07:00:00Z")
         self.assertEqual(summary["schedule_status"], "changed")
-        self.assertIsNone(summary["status"])
+        self.assertNotIn("status", summary)
 
     def test_category_emits_schedule_without_calendar_keyword(self) -> None:
         item = notification("n1", title="AI 스터디 안내", body="내일 오후 3시에 만나요.")
@@ -168,12 +166,12 @@ class ActionItemExtractionTests(unittest.TestCase):
         self.assertEqual(summary["when"], "2026-09-21T07:00:00Z")
         self.assertEqual(summary["schedule_status"], "changed")
 
-    def test_cancellation_is_not_calendar_registration_status(self) -> None:
+    def test_cancellation_returns_only_schedule_status(self) -> None:
         summary = self.schedules([
             notification("n1", title="팀 회의 취소", body="9월 21일 오후 4시 회의가 취소되었습니다.")
         ])[0]
         self.assertEqual(summary["schedule_status"], "cancelled")
-        self.assertIsNone(summary["status"])
+        self.assertNotIn("status", summary)
 
     def test_resumed_schedule_after_cancellation_is_scheduled(self) -> None:
         summary = self.schedules([
@@ -220,21 +218,14 @@ class ActionItemExtractionTests(unittest.TestCase):
         self.assertNotEqual(summaries[0]["summary_id"], summaries[1]["summary_id"])
         self.assertEqual({summary["where"] for summary in summaries}, {"A회의실", "B회의실"})
 
-    def test_registration_status_accepts_only_confirmed_integer_values_or_unknown(self) -> None:
+    def test_schedule_has_no_calendar_registration_field(self) -> None:
         result = self.build([
             notification("n1", title="회의", body="내일 오후 3시 회의입니다.")
         ])
         summary = result.groups[0].schedule_summaries[0]
-        self.assertIsNone(summary.to_dict()["status"])
-        # This tests serialization only; the extraction pipeline never claims registration.
-        for value in (0, 1):
-            confirmed = replace(summary, registration_status=value)
-            self.assertEqual(confirmed.to_dict()["status"], value)
-            self.assertEqual(confirmed.to_dict()["schedule_status"], "scheduled")
-        for value in (True, False, 2, "registered"):
-            with self.subTest(value=value):
-                with self.assertRaises(ContractValidationError):
-                    replace(summary, registration_status=value)
+        self.assertFalse(hasattr(summary, "registration_status"))
+        self.assertNotIn("status", summary.to_dict())
+        self.assertEqual(summary.to_dict()["schedule_status"], "scheduled")
 
 
 if __name__ == "__main__":

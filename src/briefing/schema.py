@@ -193,19 +193,10 @@ class ScheduleSummary:
     source_notification_ids: tuple[str, ...]
     source_group_ids: tuple[str, ...]
     is_all_day: bool | None = None
-    registration_status: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.registration_status is not None and (
-            type(self.registration_status) is not int
-            or self.registration_status not in (0, 1)
-        ):
-            raise ContractValidationError("registration_status must be 0, 1, or None")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "summary_id": self.summary_id,
-            "status": self.registration_status,
             "schedule_status": self.status,
             "is_all_day": self.is_all_day,
             **self.schedule_details.to_dict(),

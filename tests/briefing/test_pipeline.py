@@ -127,11 +127,11 @@ class BriefingPipelineTests(unittest.TestCase):
                 self.assertEqual(len(card["schedule_summaries"]), 1)
                 summary = card["schedule_summaries"][0]
                 self.assertEqual(summary["where"], "B강의실")
-                self.assertIsNone(summary["status"])
+                self.assertNotIn("status", summary)
                 self.assertEqual(summary["schedule_status"], "scheduled")
                 self.assertFalse(summary["is_all_day"])
                 self.assertEqual(set(summary), {
-                    "summary_id", "status", "schedule_status", "is_all_day",
+                    "summary_id", "schedule_status", "is_all_day",
                     "who", "when", "where", "what", "why", "how",
                 })
                 self.assertNotIn("schedule_details", summary)

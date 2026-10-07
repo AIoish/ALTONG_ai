@@ -77,17 +77,15 @@ dashboard card with exactly these seven fields: `session_id`, `group_id`,
 in the same category may still be separate cards.
 
 Schedule reports are flattened: there is no nested `schedule_details`.
-Each report contains exactly `summary_id`, `status`, `schedule_status`,
+Each report contains exactly `summary_id`, `schedule_status`,
 `is_all_day`, and the six fields `who`, `when`, `where`, `what`, `why`, `how`.
 An empty schedule list is `[]`; source details that cannot be extracted remain
 `null`.
 
-- `status` is actual calendar registration status: `1` = confirmed registered,
-  `0` = confirmed not registered, `null` = not checked / unknown. The current
-  briefing extractor has no calendar lookup or registration API, so it always
-  generates `null`. A calendar integration must supply verified results; finding
-  a date in text never implies successful registration.
-- `schedule_status` describes the source event, independently of registration:
+- Calendar registration status is not returned by briefing. A downstream
+  calendar integration must track its own verified registration results;
+  finding a date in text never implies successful registration.
+- `schedule_status` describes the source event:
   `scheduled`, `changed`, or `cancelled`. Consumers must not register a cancelled
   event as a new appointment.
 - `is_all_day` is `false` for a parsed clock time, `true` for a date-only schedule,
@@ -123,7 +121,6 @@ The following is a complete example, including every dashboard field:
       "schedule_summaries": [
         {
           "summary_id": "schedule_001",
-          "status": null,
           "schedule_status": "scheduled",
           "is_all_day": false,
           "who": "개발팀",
