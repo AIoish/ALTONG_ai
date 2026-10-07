@@ -3,6 +3,7 @@ import json
 import unittest
 
 from briefing_training.prepare_dataset import (
+    CONVERSATION_REPAIR_SCENARIOS,
     SCENARIOS,
     TARGETED_SCENARIO_NAMES,
     build_record,
@@ -16,6 +17,28 @@ from src.briefing.schema import FILTER_CATEGORIES
 
 
 class PrepareQwenDatasetTests(unittest.TestCase):
+    def test_repair_targets_preserve_subject_and_distributed_details(self) -> None:
+        for scenario in CONVERSATION_REPAIR_SCENARIOS:
+            for split in ("train", "validation"):
+                record = build_record(scenario, split, 0)
+                target = " ".join(record["target"]["summary_lines"])
+                variant = scenario.variants[0 if split == "train" else -1]
+                for key in ("subject", "place", "artifact", "who", "reason", "method", "amount"):
+                    if key in variant:
+                        self.assertIn(variant[key], target, (scenario.name, key))
+                if "final_state" in scenario.name or "cancelled" in scenario.name:
+                    self.assertNotIn("처리 중", target)
+                    self.assertNotIn("요청했", target)
+                    self.assertNotIn("예약이 있습니다", target)
+
+    def test_incident_target_keeps_specific_symptom(self) -> None:
+        scenario = next(s for s in SCENARIOS if s.name == "fragmented_colloquial_incident")
+        record = build_record(scenario, "train", 0)
+        target = " ".join(record["target"]["summary_lines"])
+        self.assertIn("응답 끊김", target)
+        self.assertIn("긴급 복구", target)
+        self.assertNotIn("해야 합니다", target)
+
     def test_all_official_categories_are_covered(self) -> None:
         self.assertEqual(
             {scenario.category for scenario in SCENARIOS},
@@ -48,6 +71,11 @@ class PrepareQwenDatasetTests(unittest.TestCase):
                 }
             ),
             160,
+        )
+        self.assertTrue(
+            {normalized_body_fingerprint(record) for record in train_records}.isdisjoint(
+                normalized_body_fingerprint(record) for record in validation_records
+            )
         )
         self.assertTrue(
             {record["case_id"] for record in train_records}.isdisjoint(

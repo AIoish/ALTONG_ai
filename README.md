@@ -76,9 +76,19 @@ dashboard card with exactly these seven fields: `session_id`, `group_id`,
 `schedule_summaries`. The category is selected from filtering results; groups
 in the same category may still be separate cards.
 
+There is currently no conversation/room identifier or room-name field. `sender`
+is the source-provided sender string, not a separately identified room. Grouping
+uses app, sender, related text, time proximity, and (for fragments) adjacent IDs.
+`group_id` hashes the sorted source notification IDs; re-summarizing the same ID
+set preserves it, while adding/removing notifications changes it. `summary_id`
+is derived from `group_id`, not from a persistent calendar event identity.
+Neither ID includes the session ID, so use `(session_id, group_id)` for a card's
+storage key. Registration/deduplication of the same real-world calendar event
+across groups requires a separate downstream identity strategy.
+
 Schedule reports are flattened: there is no nested `schedule_details`.
 Each report contains exactly `summary_id`, `schedule_status`,
-`is_all_day`, and the six fields `who`, `when`, `where`, `what`, `why`, `how`.
+`is_all_day`, `end_at`, and the six fields `who`, `when`, `where`, `what`, `why`, `how`.
 An empty schedule list is `[]`; source details that cannot be extracted remain
 `null`.
 
@@ -91,11 +101,17 @@ An empty schedule list is `[]`; source details that cannot be extracted remain
 - `is_all_day` is `false` for a parsed clock time, `true` for a date-only schedule,
   and `null` if no valid date/time was parsed. Date-only schedules are treated as
   all-day dates; they are not converted into artificial midnight appointments.
-- `when` is a UTC ISO 8601 timestamp with `Z` for timed schedules, a
+- `when` is the start: a UTC ISO 8601 timestamp with `Z` for timed schedules, a
   `YYYY-MM-DD` date for date-only schedules, and `null` when unknown.
   Korean source clock times and relative dates use Asia/Seoul (UTC+09:00).
   Thus October 12 at 7 p.m. in Korea is `2026-10-12T10:00:00Z`.
   Missing or invalid dates must not trigger automatic calendar registration.
+- `end_at` is a UTC ISO 8601 timestamp with `Z` only when an explicit end time
+  can be paired with the start. Otherwise it is `null`, including date-only
+  schedules. No default duration is added. Explicit ranges such as
+  `오후 2시부터 4시까지` / `14:00~16:00` and separate end-time messages are
+  supported. An end at or before the start is rejected unless a later date or
+  `다음 날` is stated; ambiguous overnight ranges are not guessed.
 
 `todo_candidates`, `calendar_candidates`, their presence flags, public source
 IDs, scores, counters, and `generated_at` are not returned. Task candidate
@@ -123,6 +139,7 @@ The following is a complete example, including every dashboard field:
           "summary_id": "schedule_001",
           "schedule_status": "scheduled",
           "is_all_day": false,
+          "end_at": null,
           "who": "개발팀",
           "when": "2026-10-12T10:00:00Z",
           "where": "창의관 402호",

@@ -101,6 +101,19 @@ fixed record with a different date, and scenario families are interleaved in
 the generated files. Generation fails if any two message-body sequences become
 identical after IDs, dates, and times are ignored.
 
+The targeted pool also includes seven conversation-repair families: subjects
+mentioned only in the first message, separately supplied deliverables and
+deadlines, completed delivery with a pickup location, cancelled appointments,
+completed password resets and refunds, lost-property retrieval, and schedule
+purpose/participants spread across messages. The default total remains
+1,200/160; these families replace part of the existing targeted allocation.
+Incident references preserve the specific symptom instead of reducing it to
+an unspecified problem. The independent 30 evaluation cases are unchanged.
+These changes require a new training run (for example, a separate v6 output
+directory); do not resume a v5 trainer checkpoint with this changed dataset.
+Keep the v5 adapter and its evaluation results for comparison. This does not
+change the public dashboard JSON or the runtime prompt.
+
 To create a smaller temporary dataset, override the exact record counts:
 
 ```powershell

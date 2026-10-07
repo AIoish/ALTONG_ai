@@ -574,7 +574,7 @@ COLLOQUIAL_SCENARIOS = (
             NotificationTemplate("{sender}", "지금 {action} 중"),
             NotificationTemplate("{sender}", "끝나면 다시 말할게"),
         ),
-        target_lines=("{subject}에 문제가 발생해 {action} 중입니다.",),
+        target_lines=("{subject}에서 {symptom_summary} 현재 {action} 중입니다.",),
         max_summary_lines=1,
     ),
     Scenario(
@@ -714,6 +714,79 @@ COLLOQUIAL_SCENARIOS = (
 
 SCENARIOS = BASE_SCENARIOS + ADDITIONAL_SCENARIOS + COLLOQUIAL_SCENARIOS
 
+_SCENARIO_BY_NAME = {scenario.name: scenario for scenario in SCENARIOS}
+
+
+def _conversation_scenario(
+    name: str, source: str, bodies: tuple[str, ...], targets: tuple[str, ...]
+) -> Scenario:
+    """Reuse held-out entities, but teach a different message decomposition."""
+    original = _SCENARIO_BY_NAME[source]
+    variants = original.variants
+    if source == "refund_completed":
+        amounts = ("24,000원", "18,500원", "46,000원", "12,800원", "57,000원")
+        variants = tuple(
+            {**variant, "amount": amount}
+            for variant, amount in zip(variants, amounts, strict=True)
+        )
+    return Scenario(
+        name=name,
+        category=original.category,
+        variants=variants,
+        notifications=tuple(NotificationTemplate("{sender}", body) for body in bodies),
+        target_lines=targets,
+        max_summary_lines=len(targets),
+    )
+
+
+CONVERSATION_REPAIR_SCENARIOS = (
+    _conversation_scenario(
+        "fragmented_subject_task_deliverables", "fragmented_task_chat",
+        ("{subject} 건 이야기예요.", "마감은 {date}예요.", "{time}까지 부탁해요.",
+         "{artifact}도 필요해요.", "그 자료는 {place}에 올려 주세요."),
+        ("{subject} 작업은 {date} {time}까지 완료해야 합니다.",
+         "{artifact}를 {place}에 올려야 합니다."),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_delivery_result", "fragmented_colloquial_delivery",
+        ("주문했던 {subject} 말인데요.", "아까 배송을 마쳤어요.",
+         "수령 위치는 {place}예요.", "거기에서 가져가시면 됩니다."),
+        ("주문한 {subject} 배송이 완료되어 {place}에서 수령할 수 있습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_cancelled", "appointment_cancelled",
+        ("{subject} 예약 관련해서요.", "{date} 예약이고요.", "시간은 {time}였어요.",
+         "기관 사정으로 그 예약은 취소됐습니다."),
+        ("{date} {time} {subject} 예약이 취소되었습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_reset_final_state", "password_reset_completed",
+        ("{subject} 보호 조치예요.", "비밀번호 재설정을 요청했어요.",
+         "방금 재설정이 완료됐어요.", "모든 기기에서 로그아웃도 끝났어요."),
+        ("{subject} 비밀번호 재설정이 완료되어 모든 기기에서 로그아웃되었습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_refund_final_state", "refund_completed",
+        ("{subject} 환불 건이에요.", "지금은 처리 중이에요.",
+         "업데이트할게요. 환불이 완료됐어요.", "{amount}이 결제한 카드로 반환됐습니다."),
+        ("{subject} 환불이 완료되어 {amount}이 결제한 카드로 반환되었습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_notice_retrieval", "fragmented_colloquial_notice",
+        ("분실한 {subject} 관련입니다.", "찾아서 보관하고 있어요.",
+         "보관 장소는 {place}예요.", "여기로 찾으러 오세요."),
+        ("발견된 {subject}은 {place}에 보관 중이며 해당 장소에서 찾아갈 수 있습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_schedule_purpose", "fragmented_schedule_chat",
+        ("{subject} 진행할게요.", "참석 대상은 {who}예요.", "{date}에 만나요.",
+         "시작은 {time}예요.", "{place}에서 진행합니다.",
+         "{reason} 때문에 모이는 거예요.", "진행 방식은 {method}입니다."),
+        ("{who} 대상 {subject} 일정은 {date} {time} {place}입니다.",
+         "{reason}을 위해 {method} 방식으로 진행합니다."),
+    ),
+)
+
 TARGETED_SCENARIO_NAMES = (
     "appointment_cancelled",
     "fragmented_schedule_chat",
@@ -727,11 +800,11 @@ TARGETED_SCENARIO_NAMES = (
     "fragmented_colloquial_delivery",
     "fragmented_colloquial_promotion",
     "fragmented_colloquial_notice",
-)
+) + tuple(scenario.name for scenario in CONVERSATION_REPAIR_SCENARIOS)
 TARGETED_SCENARIOS = tuple(
     scenario for scenario in SCENARIOS
     if scenario.name in TARGETED_SCENARIO_NAMES
-)
+) + CONVERSATION_REPAIR_SCENARIOS
 
 if len(TARGETED_SCENARIOS) != len(TARGETED_SCENARIO_NAMES):
     raise RuntimeError("a targeted fine-tuning scenario is not configured")
@@ -846,6 +919,14 @@ def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
 
     values = dict(_variant_for(scenario, split, index))
     values.update(_context_for(split, index))
+    if scenario.name == "fragmented_colloquial_incident":
+        values["symptom_summary"] = {
+            "응답이 계속 끊겨": "응답 끊김이 반복되어",
+            "500 오류가 반복돼": "500 오류가 반복되어",
+            "접속이 안 돼": "접속이 불가능하여",
+            "배포 뒤에 장애 났어": "배포 후 장애가 발생하여",
+            "지연이 너무 길어": "지연이 길어져",
+        }[values["symptom"]]
     notifications = []
     for step, template in enumerate(scenario.notifications):
         body = template.body.format(**values)

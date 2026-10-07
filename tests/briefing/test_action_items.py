@@ -78,7 +78,7 @@ class ActionItemExtractionTests(unittest.TestCase):
         self.assertNotIn("status", summary)
         self.assertEqual(summary["what"], "프로젝트 회의 일정")
         self.assertEqual(set(summary), {
-            "summary_id", "schedule_status", "is_all_day",
+            "summary_id", "schedule_status", "is_all_day", "end_at",
             "who", "when", "where", "what", "why", "how",
         })
 
@@ -226,6 +226,103 @@ class ActionItemExtractionTests(unittest.TestCase):
         self.assertFalse(hasattr(summary, "registration_status"))
         self.assertNotIn("status", summary.to_dict())
         self.assertEqual(summary.to_dict()["schedule_status"], "scheduled")
+
+    def test_explicit_ranges_use_start_and_end_in_utc(self) -> None:
+        for text in (
+            "9월 20일 오후 2시부터 4시까지 회의입니다.",
+            "9월 20일 오후 2시~오후 4시 회의입니다.",
+            "9월 20일 14:00-16:00 회의입니다.",
+            "9월 20일 14시~16시 회의입니다.",
+        ):
+            with self.subTest(text=text):
+                summary = self.schedules([notification("n1", title="팀 회의", body=text)])[0]
+                self.assertEqual(summary["when"], "2026-09-20T05:00:00Z")
+                self.assertEqual(summary["end_at"], "2026-09-20T07:00:00Z")
+                self.assertFalse(summary["is_all_day"])
+
+    def test_range_preserves_minutes(self) -> None:
+        summary = self.schedules([notification(
+            "n1", title="회의", body="내일 오전 10시 30분부터 오전 11시 45분까지 회의입니다."
+        )])[0]
+        self.assertEqual(summary["when"], "2026-09-14T01:30:00Z")
+        self.assertEqual(summary["end_at"], "2026-09-14T02:45:00Z")
+
+    def test_labeled_start_and_end_in_one_message(self) -> None:
+        summary = self.schedules([notification(
+            "n1", title="회의", body="9월 20일 시작: 오후 2시, 종료: 오후 4시입니다."
+        )])[0]
+        self.assertEqual(summary["when"], "2026-09-20T05:00:00Z")
+        self.assertEqual(summary["end_at"], "2026-09-20T07:00:00Z")
+
+    def test_start_only_date_only_and_unknown_have_null_end(self) -> None:
+        for body in ("9월 20일 오후 2시 회의입니다.", "9월 20일 회의입니다.", "회의 장소는 A회의실입니다."):
+            with self.subTest(body=body):
+                summary = self.schedules([notification("n1", title="회의", body=body)])[0]
+                self.assertIsNone(summary["end_at"])
+
+    def test_fragmented_end_does_not_replace_start(self) -> None:
+        summary = self.schedules([
+            notification("chat_001", title="회의", body="9월 20일 오후 2시 시작합니다."),
+            notification("chat_002", title="회의", body="오후 4시에 종료합니다.",
+                         timestamp="2026-09-13T09:06:00Z"),
+        ])[0]
+        self.assertEqual(summary["when"], "2026-09-20T05:00:00Z")
+        self.assertEqual(summary["end_at"], "2026-09-20T07:00:00Z")
+
+    def test_changed_start_clears_previous_end(self) -> None:
+        summary = self.schedules([
+            notification("chat_001", title="회의", body="9월 20일 오후 2시~4시 회의입니다."),
+            notification("chat_002", title="회의 변경", body="9월 21일 오후 5시로 변경됩니다.",
+                         timestamp="2026-09-13T09:06:00Z"),
+        ])[0]
+        self.assertEqual(summary["when"], "2026-09-21T08:00:00Z")
+        self.assertIsNone(summary["end_at"])
+        self.assertEqual(summary["schedule_status"], "changed")
+
+    def test_same_message_corrected_range_uses_latest_range(self) -> None:
+        summary = self.schedules([notification(
+            "n1", title="회의 변경",
+            body="9월 20일 오후 2시~4시에서 9월 21일 오후 3시~5시로 변경되었습니다."
+        )])[0]
+        self.assertEqual(summary["when"], "2026-09-21T06:00:00Z")
+        self.assertEqual(summary["end_at"], "2026-09-21T08:00:00Z")
+
+    def test_same_message_start_correction_clears_old_range(self) -> None:
+        summary = self.schedules([notification(
+            "n1", title="회의 변경",
+            body="9월 20일 오후 2시~4시였지만 9월 21일 오후 5시로 변경됩니다."
+        )])[0]
+        self.assertEqual(summary["when"], "2026-09-21T08:00:00Z")
+        self.assertIsNone(summary["end_at"])
+
+    def test_explicit_end_date_or_next_day_supports_overnight(self) -> None:
+        for body in (
+            "9월 20일 오후 11시부터 다음 날 오전 1시까지 회의입니다.",
+            "9월 20일 오후 11시부터 9월 21일 오전 1시까지 회의입니다.",
+        ):
+            with self.subTest(body=body):
+                summary = self.schedules([notification("n1", title="회의", body=body)])[0]
+                self.assertEqual(summary["when"], "2026-09-20T14:00:00Z")
+                self.assertEqual(summary["end_at"], "2026-09-20T16:00:00Z")
+
+    def test_invalid_or_ambiguous_end_keeps_start_and_null_end(self) -> None:
+        for body in (
+            "9월 20일 오후 4시~오후 2시 회의입니다.",
+            "9월 20일 오후 2시~오후 2시 회의입니다.",
+            "9월 20일 오후 11시~오전 1시 회의입니다.",
+            "9월 20일 오후 2시부터 2월 30일 오후 4시까지 회의입니다.",
+        ):
+            with self.subTest(body=body):
+                summary = self.schedules([notification("n1", title="회의", body=body)])[0]
+                self.assertIsNotNone(summary["when"])
+                self.assertIsNone(summary["end_at"])
+
+    def test_end_only_does_not_invent_a_start(self) -> None:
+        summary = self.schedules([notification(
+            "n1", title="회의 종료 안내", body="오후 4시에 종료합니다."
+        )])[0]
+        self.assertIsNone(summary["when"])
+        self.assertIsNone(summary["end_at"])
 
 
 if __name__ == "__main__":

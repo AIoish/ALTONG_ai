@@ -131,7 +131,7 @@ class BriefingPipelineTests(unittest.TestCase):
                 self.assertEqual(summary["schedule_status"], "scheduled")
                 self.assertFalse(summary["is_all_day"])
                 self.assertEqual(set(summary), {
-                    "summary_id", "schedule_status", "is_all_day",
+                    "summary_id", "schedule_status", "is_all_day", "end_at",
                     "who", "when", "where", "what", "why", "how",
                 })
                 self.assertNotIn("schedule_details", summary)

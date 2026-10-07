@@ -193,12 +193,14 @@ class ScheduleSummary:
     source_notification_ids: tuple[str, ...]
     source_group_ids: tuple[str, ...]
     is_all_day: bool | None = None
+    end_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "summary_id": self.summary_id,
             "schedule_status": self.status,
             "is_all_day": self.is_all_day,
+            "end_at": self.end_at,
             **self.schedule_details.to_dict(),
         }
 

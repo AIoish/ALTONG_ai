@@ -111,6 +111,16 @@ class ScheduleExtraction:
 class _TemporalMatch:
     value: datetime
     is_all_day: bool
+    end: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _Clock:
+    start: int
+    end: int
+    hour: int
+    minute: int
+    ampm: str | None = None
 
 
 class ActionItemProvider(Protocol):
@@ -138,10 +148,8 @@ def _matched_cues(text: str, cues: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(cue for cue in cues if cue in normalized)
 
 
-def _parse_last_time(text: str) -> tuple[int, int] | None:
-    """Return the last stated clock time, used for schedule corrections."""
-
-    candidates: list[tuple[int, int, int]] = []
+def _clock_matches(text: str) -> list[_Clock]:
+    candidates: list[_Clock] = []
     ampm_matches = list(_AMPM_TIME_PATTERN.finditer(text))
     for match in ampm_matches:
         hour = int(match.group("hour"))
@@ -151,10 +159,11 @@ def _parse_last_time(text: str) -> tuple[int, int] | None:
             hour = 0 if hour == 12 else hour
         else:
             hour = 12 if hour == 12 else hour + 12
-        candidates.append((match.start(), hour, int(match.group("minute") or 0)))
+        candidates.append(_Clock(match.start(), match.end(), hour,
+                                 int(match.group("minute") or 0), match.group("ampm")))
     for match in _COLON_TIME_PATTERN.finditer(text):
         candidates.append(
-            (match.start(), int(match.group("hour")), int(match.group("minute")))
+            _Clock(match.start(), match.end(), int(match.group("hour")), int(match.group("minute")))
         )
     for match in _HOUR_TIME_PATTERN.finditer(text):
         if any(
@@ -163,16 +172,56 @@ def _parse_last_time(text: str) -> tuple[int, int] | None:
         ):
             continue
         candidates.append(
-            (
-                match.start(),
+            _Clock(
+                match.start(), match.end(),
                 int(match.group("hour")),
                 int(match.group("minute") or 0),
             )
         )
-    if not candidates:
-        return None
-    _, hour, minute = max(candidates, key=lambda candidate: candidate[0])
-    return hour, minute
+    return sorted(candidates, key=lambda candidate: candidate.start)
+
+
+def _date_in(text: str, base: datetime) -> tuple[int, int, int] | None:
+    dates = list(_DATE_PATTERN.finditer(text))
+    match = dates[-1] if dates else None
+    position, relative = max(
+        ((text.rfind(word), word) for word in _RELATIVE_DAYS if word in text),
+        default=(-1, None),
+    )
+    if match and match.start() > position:
+        return (int(match.group("year") or base.year),
+                int(match.group("month")), int(match.group("day")))
+    if relative:
+        day = base.date() + timedelta(days=_RELATIVE_DAYS[relative])
+        return day.year, day.month, day.day
+    return None
+
+
+def _time_range(text: str, clocks: list[_Clock]) -> tuple[_Clock, _Clock, str] | None:
+    """Recognize explicit ranges, not '2시에서 4시로 변경' corrections."""
+    ranges = []
+    for start, end in zip(clocks, clocks[1:]):
+        between = text[start.end:end.start]
+        connector = _DATE_PATTERN.sub("", between)
+        connector = re.sub(r"다음\s*날|익일|오늘|내일|모레", "", connector).strip()
+        if connector not in ("부터", "~", "～", "-", "–", "—"):
+            continue
+        if connector == "부터" and not re.match(r"\s*까지", text[end.end:]):
+            continue
+        if end.ampm is None and start.ampm and end.hour <= 12:
+            hour = end.hour % 12 + (12 if start.ampm == "오후" else 0)
+            end = _Clock(end.start, end.end, hour, end.minute, start.ampm)
+        ranges.append((start, end, between))
+    return ranges[-1] if ranges else None
+
+
+def _is_end_clock(text: str, clock: _Clock) -> bool:
+    before = text[:clock.start]
+    after = text[clock.end:]
+    return bool(
+        re.search(r"(?:종료|끝나는|마치는)\s*(?:시각|시간)?\s*(?:은|는|:)?\s*$", before)
+        or re.match(r"\s*(?:에\s*)?(?:종료|끝|마칩니다|마쳐요)", after)
+    )
 
 
 def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | None:
@@ -181,40 +230,51 @@ def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | Non
     latest_date: tuple[int, int, int] | None = None
     latest_time: tuple[int, int] | None = None
     latest_time_base: datetime | None = None
+    end_time: tuple[int, int] | None = None
+    end_date: tuple[int, int, int] | None = None
+    next_day_end = False
 
     for item in items:
         notification = item.notification
         text = f"{notification.title} {notification.body}"
         base = notification.timestamp.astimezone(_SCHEDULE_TIMEZONE)
-        date_matches = list(_DATE_PATTERN.finditer(text))
-        date_match = date_matches[-1] if date_matches else None
-        relative_positions = [
-            (text.rfind(word), word) for word in _RELATIVE_DAYS if word in text
-        ]
-        relative_position, relative_match = max(
-            relative_positions,
-            default=(-1, None),
-        )
-        date_position = date_match.start() if date_match else -1
+        clocks = _clock_matches(text)
+        time_range = _time_range(text, clocks)
+        if (time_range and clocks[-1].start > time_range[1].start
+                and not _is_end_clock(text, clocks[-1])):
+            # A later standalone correction supersedes an earlier interval.
+            time_range = None
+        if clocks and not time_range and _is_end_clock(text, clocks[-1]):
+            start_clocks = [clock for clock in clocks[:-1] if not _is_end_clock(text, clock)]
+            if start_clocks:
+                start, end = start_clocks[-1], clocks[-1]
+                time_range = (start, end, text[start.end:end.start])
+        if clocks and not time_range and _is_end_clock(text, clocks[-1]):
+            clock = clocks[-1]
+            end_time = (clock.hour, clock.minute)
+            end_date = _date_in(text, base)
+            next_day_end = bool(re.search(r"다음\s*날|익일", text))
+            continue
 
-        if date_match and date_position > relative_position:
-            latest_date = (
-                int(date_match.group("year") or base.year),
-                int(date_match.group("month")),
-                int(date_match.group("day")),
-            )
-        elif relative_match:
-            relative_date = base.date() + timedelta(days=_RELATIVE_DAYS[relative_match])
-            latest_date = (
-                relative_date.year,
-                relative_date.month,
-                relative_date.day,
-            )
-
-        parsed_time = _parse_last_time(text)
+        date_text = text[:time_range[0].start] if time_range else text
+        parsed_date = _date_in(date_text, base)
+        parsed_clock = time_range[0] if time_range else clocks[-1] if clocks else None
+        parsed_time = (parsed_clock.hour, parsed_clock.minute) if parsed_clock else None
+        # A changed start invalidates a previous end unless a new end is stated.
+        if ((parsed_date is not None and parsed_date != latest_date)
+                or (parsed_time is not None and parsed_time != latest_time)):
+            end_time = end_date = None
+            next_day_end = False
+        if parsed_date is not None:
+            latest_date = parsed_date
         if parsed_time is not None:
             latest_time = parsed_time
             latest_time_base = base
+        if time_range:
+            _, end, between = time_range
+            end_time = (end.hour, end.minute)
+            end_date = _date_in(between, base)
+            next_day_end = bool(re.search(r"다음\s*날|익일", between))
 
     if latest_date is None and latest_time is None:
         return None
@@ -234,7 +294,18 @@ def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | Non
         ).astimezone(timezone.utc)
     except ValueError:
         return None
-    return _TemporalMatch(value=value, is_all_day=latest_time is None)
+    end_value = None
+    if latest_time is not None and end_time is not None:
+        try:
+            day = datetime(*(end_date or latest_date), tzinfo=_SCHEDULE_TIMEZONE)
+            if next_day_end and end_date is None:
+                day += timedelta(days=1)
+            candidate = day.replace(hour=end_time[0], minute=end_time[1]).astimezone(timezone.utc)
+            if candidate > value:
+                end_value = candidate
+        except ValueError:
+            pass
+    return _TemporalMatch(value=value, is_all_day=latest_time is None, end=end_value)
 
 
 def _clean_detail(value: str) -> str | None:
@@ -358,6 +429,6 @@ class RuleBasedActionItemProvider:
             source_notification_ids=tuple(item.notification.id for item in ordered),
             source_group_ids=(group_id,),
             is_all_day=temporal.is_all_day if temporal else None,
+            end_at=format_timestamp(temporal.end) if temporal and temporal.end else None,
         )
-        # Registration status stays unknown until a calendar owner confirms it.
         return ScheduleExtraction(schedules=(summary,))

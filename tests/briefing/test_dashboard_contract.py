@@ -15,7 +15,7 @@ CARD_FIELDS = {
     "summary_lines", "schedule_summaries",
 }
 SCHEDULE_FIELDS = {
-    "summary_id", "schedule_status", "is_all_day",
+    "summary_id", "schedule_status", "is_all_day", "end_at",
     "who", "when", "where", "what", "why", "how",
 }
 
