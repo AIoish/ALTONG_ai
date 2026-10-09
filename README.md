@@ -228,7 +228,13 @@ fragments, the same sender in a different room, and a different sender in the
 same room. The reports must be requested explicitly; file writing and session
 completion triggers are application integration responsibilities.
 
-See `briefing_training/README.md` for the separate v7 dataset and training steps.
+See `briefing_training/README.md` for the v8 policy-aligned dataset and training steps.
+The v7 dataset/adapter remains available as a comparison baseline. v8 adds
+source-grounded one-line requests, aligns scenario labels with the category
+guide and avoids treating room names as summary facts. Calendar `what` extraction
+also uses a concise source-backed event phrase for Kakao messages, rather than
+copying a whole attendee/date sentence. These changes require model re-evaluation;
+unit tests alone do not establish improved summary quality.
 Changing the model's task from summary-only to classification+summary requires
 new supervision; v6 checkpoint resumption is not the v7 training workflow.
 

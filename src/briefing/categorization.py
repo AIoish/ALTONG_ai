@@ -26,17 +26,17 @@ def categorize_text(items: list[BriefingItem]) -> CategoryDecision:
         for item in items
     )
     if any(word in text for word in ("서버", "배치", "장애", "배포", "DB", "API")) and any(
-        word in text for word in ("긴급", "오류", "장애", "중단", "멈", "복구", "정상화")
+        word in text for word in ("긴급", "오류", "장애", "실패", "중단", "멈", "복구", "정상화")
     ):
         category = "긴급 업무"
-    elif any(word in text for word in ("비밀번호", "로그아웃", "보안", "의심 기기", "로그인", "인증", "시스템 점검", "서버 점검")):
+    elif any(word in text for word in ("비밀번호", "로그아웃", "보안", "의심 기기", "로그인", "인증", "시스템 점검", "서버 점검", "엘리베이터 점검")):
         category = "시스템/보안"
-    elif any(word in text for word in ("회의", "일정", "시험", "오리엔테이션", "스터디", "면담", "멘토링", "만나요")):
-        category = "일정/회의"
     elif any(word in text for word in ("쿠폰", "할인", "프로모션", "행사 기간", "광고")):
         category = "광고/홍보"
-    elif any(word in text for word in ("병원", "치과", "진료", "예약", "환불", "결제", "배송")):
+    elif any(word in text for word in ("병원", "치과", "진료", "예약", "환불", "결제", "배송", "이용권", "구독")):
         category = "개인 중요"
+    elif any(word in text for word in ("회의", "일정", "시험", "오리엔테이션", "스터디", "면담", "멘토링", "만나요")):
+        category = "일정/회의"
     elif any(word in text for word in ("보고서", "과제", "제출", "업무", "리뷰", "작업", "업로드", "서버", "배포", "검토", "안내문")):
         category = "일반 업무"
     elif items and app_identity(items[0].notification.app_name) == "kakaotalk":

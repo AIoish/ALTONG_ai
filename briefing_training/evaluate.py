@@ -65,9 +65,18 @@ def _reference_summary_lines(case: Mapping[str, Any]) -> tuple[str, ...]:
             "reference_summary_lines must be a non-empty array of strings"
         )
     normalized = tuple(line.strip() for line in lines)
-    if len(normalized) > _max_summary_lines(case):
+    if len(normalized) > _expected_max_summary_lines(case):
         raise ValueError("reference_summary_lines exceeds max_summary_lines")
     return normalized
+
+
+def _expected_max_summary_lines(case: Mapping[str, Any]) -> int:
+    """Separate concision assessment from the model-visible three-line ceiling."""
+    ceiling = _max_summary_lines(case)
+    value = case.get("expected_max_summary_lines", ceiling)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= ceiling:
+        raise ValueError("expected_max_summary_lines must be within max_summary_lines")
+    return value
 
 
 def validate_evaluation_cases(cases: Sequence[Mapping[str, Any]]) -> None:
@@ -273,7 +282,7 @@ def main() -> None:
             forbidden_hits = tuple(
                 phrase for phrase in forbidden_phrases if phrase in combined
             )
-            line_limit_passed = len(summary_lines) <= max_summary_lines
+            line_limit_passed = len(summary_lines) <= _expected_max_summary_lines(case)
             fact_hits += hits
             error = None
         except ValueError as exc:
@@ -314,6 +323,7 @@ def main() -> None:
                 "missing_expected_facts": missing_expected_facts,
                 "forbidden_phrase_hits": list(forbidden_hits),
                 "max_summary_lines": max_summary_lines,
+                "expected_max_summary_lines": _expected_max_summary_lines(case),
                 "line_limit_passed": line_limit_passed,
                 "latency_seconds": round(elapsed_seconds, 2),
                 "summary_lines": list(summary_lines),

@@ -364,11 +364,37 @@ def _calendar_title(items: Sequence[BriefingItem]) -> str:
     _, natural_what = _natural_who_what(combined)
     if natural_what:
         return natural_what
+    explicit = _extract_detail(_WHAT_PATTERN, combined)
+    if explicit:
+        return explicit
     for item in items:
         source_text = _source_text(item)
         if _matched_cues(source_text, _CALENDAR_CUES):
-            return (item.notification.body if app_identity(item.notification.app_name) == "kakaotalk"
-                    else item.notification.title)
+            if app_identity(item.notification.app_name) != "kakaotalk":
+                return item.notification.title
+            # A room title is not an event title. Extract a short source-backed
+            # noun phrase, ignoring attendee/location sentences and dates.
+            for sentence in re.split(r"[.!?\n]", item.notification.body):
+                if _WHO_PATTERN.search(sentence) or _WHERE_PATTERN.search(sentence):
+                    continue
+                cleaned = _DATE_PATTERN.sub(" ", sentence)
+                cleaned = _AMPM_TIME_PATTERN.sub(" ", cleaned)
+                cleaned = _COLON_TIME_PATTERN.sub(" ", cleaned)
+                cleaned = _HOUR_TIME_PATTERN.sub(" ", cleaned)
+                cleaned = re.sub(r"오늘|내일|모레", " ", cleaned)
+                cleaned = re.sub(r"^\s*(?:은|는|에|부터|까지|~|[-,])\s*", "", cleaned)
+                match = re.search(
+                    r"([가-힣A-Za-z0-9]+(?:\s+[가-힣A-Za-z0-9]+){0,4}\s+)?"
+                    r"(회의|스터디|멘토링|오리엔테이션|진료|예약|세미나|면담|시험|행사|제출|마감)",
+                    cleaned,
+                )
+                if match:
+                    title = " ".join(match.group().split())
+                    if title == "회의":
+                        who = _extract_detail(_WHO_PATTERN, combined)
+                        return f"{who} 회의" if who else title
+                    return title
+            return next(cue for cue in _CALENDAR_CUES if cue in source_text)
     return (items[0].notification.body if app_identity(items[0].notification.app_name) == "kakaotalk"
             else items[0].notification.title)
 

@@ -11,6 +11,7 @@ from briefing_training import evaluate
 from briefing_training import train_lora
 from briefing_training.prepare_category_dataset import (
     TRAIN_PATH, VALIDATION_PATH, EVALUATION_PATH, migrate_record, validate_records,
+    short_request_records, short_evaluation_records,
 )
 from briefing_training.prepare_dataset import SCENARIOS, build_record
 from briefing_training.smoke_test_model import render_generation_prompt, load_cases
@@ -209,11 +210,89 @@ class CategoryBriefingTests(unittest.TestCase):
         train = load_records(TRAIN_PATH, expected_split="train")
         validation = load_records(VALIDATION_PATH, expected_split="validation")
         evaluation = load_cases(EVALUATION_PATH)
-        self.assertEqual((len(train), len(validation), len(evaluation)), (1200, 160, 30))
+        self.assertEqual((len(train), len(validation), len(evaluation)), (1280, 176, 30))
         validate_split_separation(train, validation)
         self.assertEqual({record["target"]["primary_category"] for record in train}, set(FILTER_CATEGORIES))
         self.assertTrue(all("category" not in record["input"] for record in evaluation))
         evaluate.validate_evaluation_cases(evaluation)
+
+    def test_reviewed_labels_apply_to_all_splits(self):
+        for path in (TRAIN_PATH, VALIDATION_PATH):
+            records = load_cases(path)
+            deadlines = [r for r in records if r["metadata"]["scenario"] == "deadline_extended"]
+            self.assertTrue(deadlines)
+            self.assertTrue(all(r["target"]["primary_category"] == "일반 업무" for r in deadlines))
+        cases = {r["case_id"]: r for r in load_cases(EVALUATION_PATH)}
+        for name, category in (("assignment_deadline", "일반 업무"),
+                               ("orientation_venue_corrected", "일정/회의"),
+                               ("maintenance_schedule_corrected", "시스템/보안"),
+                               ("refund_completed", "개인 중요")):
+            self.assertEqual(cases[name]["expected_category"], category)
+        evaluate.validate_evaluation_cases([cases["password_reset_completed"]])
+
+    def test_short_requests_are_one_line_and_split_disjoint(self):
+        train, validation = short_request_records("train"), short_request_records("validation")
+        validate_split_separation(train, validation)
+        self.assertTrue(all(len(r["target"]["summary_lines"]) == 1 and r["max_summary_lines"] == 3
+                            for r in train + validation))
+        for r in train + validation:
+            self.assertNotIn("자료 모임방", " ".join(r["target"]["summary_lines"]))
+
+    def test_short_benchmark_is_held_out_and_references_pass(self):
+        cases = short_evaluation_records()
+        evaluate.validate_evaluation_cases(cases)
+        self.assertEqual(len(cases), 8)
+        evaluation_as_train = [
+            {**r, "target": {"primary_category": r["expected_category"],
+                              "summary_lines": r["reference_summary_lines"]}} for r in cases
+        ]
+        validate_split_separation(short_request_records("train"), evaluation_as_train)
+        validate_split_separation(short_request_records("validation"), evaluation_as_train)
+
+    def test_short_benchmark_scores_concision_without_prompt_leak(self):
+        case = short_evaluation_records()[0]
+        self.assertEqual(case["max_summary_lines"], 3)
+        for extra, expected in (([], True), (["확인 부탁드립니다."], False)):
+            raw = json.dumps({"primary_category": case["expected_category"],
+                              "summary_lines": case["reference_summary_lines"] + extra}, ensure_ascii=False)
+            output = io.StringIO()
+            with patch("sys.argv", ["evaluate", "--task", "briefing", "--greedy"]), \
+                 patch.object(evaluate, "load_cases", return_value=[case]), \
+                 patch.object(evaluate, "load_model", return_value=(None, None)), \
+                 patch.object(evaluate, "generate_summary", return_value=(raw, 0.1)), \
+                 redirect_stdout(output):
+                evaluate.main()
+            result = json.loads(output.getvalue())["results"][0]
+            self.assertEqual(result["passed"], expected)
+
+    def test_offline_fallback_matches_reviewed_category_policy(self):
+        for body, expected in (("보고서 제출 마감은 내일입니다.", "일반 업무"),
+                               ("엘리베이터 점검 일정은 내일입니다.", "시스템/보안"),
+                               ("치과 예약 일정은 내일입니다.", "개인 중요"),
+                               ("신규 버전 배포에 실패했습니다.", "긴급 업무")):
+            self.assertEqual(build([notification("a", body=body)]).groups[0].primary_category, expected)
+
+    def test_room_subject_not_repeated_in_migrated_body(self):
+        source = load_cases()[20]
+        migrated = migrate_record(source, evaluation=True)
+        self.assertTrue(all("캡스톤 팀 채팅" not in n["body"] for n in migrated["input"]["notifications"]))
+
+    def test_schedule_what_is_concise_not_attendee_sentence(self):
+        report = build([
+            notification("a", body="참석자는 개발팀입니다. 회의 내일 할게요."),
+            notification("b", body="오후 1시부터 2시까지요.", minute=1),
+            notification("c", body="장소는 창의관 402호입니다.", minute=2),
+        ])
+        value = report.groups[0].schedule_summaries[0].to_dict()
+        self.assertEqual(value["what"], "개발팀 회의")
+        self.assertEqual(value["who"], "개발팀")
+        self.assertEqual(value["end_at"], "2026-10-09T05:00:00Z")
+
+    def test_short_request_prompt_forbids_room_and_timestamp_invention(self):
+        prompt = build_messages(short_request_records("train")[0]["input"])[0]["content"]
+        self.assertIn("줄 수는 상한이지 목표", prompt)
+        self.assertIn("방 이름을 장소", prompt)
+        self.assertIn("timestamp는 수신 시각", prompt)
 
     def test_old_checkpoint_cannot_resume_new_task_before_model_load(self):
         with patch("sys.argv", ["train_lora", "--task", "briefing", "--resume-from-checkpoint", "old-v6-checkpoint"]), \

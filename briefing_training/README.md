@@ -1,6 +1,6 @@
 # Briefing model experiments
 
-## Current workflow: v7 briefing-owned classification + category report
+## Current workflow: v8 policy-aligned classification + concise summaries
 
 The default application Qwen contract now predicts `primary_category` and
 `summary_lines` together. Upstream filtering categories are no longer provided
@@ -10,24 +10,50 @@ category headings; it is not another calendar field or a second LLM summary.
 
 Existing v5/v6 adapters and the original datasets are preserved for summary-only
 regression comparisons. They have NOT been trained to classify categories.
-Do not resume their checkpoints for v7. Start a new adapter directory.
+Do not resume their checkpoints for the joint task. Start a new adapter directory.
+v7 adapters/data are also preserved. Train v8 separately, without resuming v7:
+supervision and the shared prompt have changed.
 
-Prepare the separate dataset (1,200 train / 160 validation / 30 evaluation):
+Prepare the separate dataset (1,280 train / 176 validation / 30 evaluation):
 
 ```powershell
 python -m briefing_training.prepare_category_dataset
 python -m briefing_training.train_lora --task briefing --validate-only
 ```
 
-Files are under `briefing_training/data/category_briefing/`. The existing
-synthetic labels move from `input.category` to `target.primary_category`;
-evaluation labels live in `expected_category` outside the model input.
-Existing labels are reused, not newly human-validated classification labels.
-Review ambiguous categories (for example, appointment vs meeting, promotion vs
-event, security vs urgent incident) before claiming deployment-quality results.
-The category dataset is a schema/task migration, not 1,200 newly authored cases.
-For Kakao training inputs, titles become neutral room names and old title-only
-subject text is retained in message bodies. Other apps retain their titles.
+Files are under `briefing_training/data/category_briefing_v8/`; v7 files under
+`category_briefing/` remain unchanged. Labels are reviewed by explicit scenario
+mapping, not inferred from model predictions. Submission deadlines are ordinary
+work; orientation venue corrections are meetings/events; facility maintenance is
+system/security; deliveries, refunds and subscriptions are important personal
+notifications. Urgent incidents remain urgent even after recovery.
+These are project policy choices, not externally validated gold labels.
+
+80 training / 16 validation examples teach one-line short requests, completed
+actions, distributed details, missing times and casual personal conversation.
+The sets use disjoint subjects; split fingerprints are checked before writing.
+Existing cases are migrated, not newly authored. Kakao titles are neutral room
+names; old room-like titles are not copied into bodies. Subject-only titles are
+preserved for legacy examples. A contradictory one-line evaluation reference
+for password reset is merged into one sentence without dropping facts.
+
+Because reference labels and inputs changed, do not compare old v7 scores with
+v8 scores directly. Re-evaluate both adapters on the same v8 cases and prompt.
+Inspect source vs generated text manually: keyword coverage does not prove that
+no dates, locations or meaningless filler were invented.
+The Korean policy and label decisions are documented in `CATEGORY_POLICY.md`.
+An additional eight-case `short_request_evaluation.jsonl` benchmark checks
+one-line concision despite the runtime three-line ceiling, essential facts and
+selected unsupported phrases. Run this separately from the original 30 cases:
+
+```powershell
+& $briefingPython -m briefing_training.evaluate `
+  --task briefing --greedy `
+  --cases briefing_training/data/category_briefing_v8/short_request_evaluation.jsonl `
+  --adapter-path "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v8-local" `
+  --output outputs/v8-short-evaluation.json `
+  --review-output outputs/v8-short-review.md
+```
 
 Laptop PowerShell (reuse the working Python 3.12 GPU environment):
 
@@ -35,7 +61,7 @@ Laptop PowerShell (reuse the working Python 3.12 GPU environment):
 $briefingPython = "C:\dev\ALTONG_ai_train_v5\.venv\Scripts\python.exe"
 & $briefingPython -m briefing_training.train_lora `
   --task briefing `
-  --output-dir "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v7-local" `
+  --output-dir "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v8-local" `
   --epochs 3 --batch-size 2 --gradient-accumulation-steps 8 `
   --learning-rate 0.0001 --max-length 2048
 ```
@@ -45,9 +71,9 @@ After training, assess BOTH classification and summary quality without sampling:
 ```powershell
 & $briefingPython -m briefing_training.evaluate `
   --task briefing --greedy `
-  --adapter-path "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v7-local" `
-  --output outputs/v7-category-evaluation.json `
-  --review-output outputs/v7-category-evaluation-review.md
+  --adapter-path "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v8-local" `
+  --output outputs/v8-category-evaluation.json `
+  --review-output outputs/v8-category-evaluation-review.md
 ```
 
 Evaluation reports `category_accuracy` and per-case predicted/expected category,
@@ -59,8 +85,8 @@ Training, evaluation and production use the same explicit non-thinking template
 and greedy evaluation/production generation for this task. Old `--prompt-style`
 differences below apply only to the legacy summary task.
 
-Once a v7 checkpoint is saved, resumption is supported with the same arguments
-and `--resume-from-checkpoint "<v7 checkpoint directory>"`. Checkpoints include
+Once a v8 checkpoint is saved, resumption is supported with the same arguments
+and `--resume-from-checkpoint "<v8 checkpoint directory>"`. Checkpoints include
 `briefing_task.json`; v5/v6 checkpoints are rejected for the new task.
 
 See the root README for category-report export. Use `--contract summary` in the
