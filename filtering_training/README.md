@@ -17,7 +17,7 @@
 | `data/` | 기존 고정 입력 자료. 이번 정리에서 내용과 위치를 변경하지 않음 |
 | `outputs/` | 데이터·가중치·검수표·실험 결과. [결과 안내](docs/ARTIFACTS.md) |
 
-## 현재 v3 작업
+## 초기 v3 작업
 
 ```text
 generation/generate_v3_seed.py
@@ -33,7 +33,7 @@ generation/generate_v3_seed.py
 
 - [최근 실험 결과와 날짜순 기록](../docs/filtering-experiment-log.md)
 - 로컬 상세 결과: `outputs/v3_reviewed_01/pilot_summary.md`
-- 로컬 학습 어댑터: `outputs/v3_reviewed_01/qwen06_pilot/adapter/`
+- 초기 학습 어댑터는 2026-10-09 정리에서 삭제했고 결과와 설정은 보존했습니다.
 
 `outputs/`와 로컬 검수·이동 기록은 Git에서 제외되므로 GitHub에는 위 로컬 파일이 없습니다.
 공유할 성능 요약은 추적되는 실험 기록에 남깁니다.
@@ -41,6 +41,37 @@ generation/generate_v3_seed.py
 정책은 긴급도 4 이상 **또는** 관련도 4 이상이면 통과입니다.
 집중 모드 ON을 전제로 하며, 빈 창도 쉬는 상태로 추정하지 않습니다.
 실제 앱의 공통 규칙과 출력 계약은 `src/filtering/`에 있습니다.
+
+## 현재 점수 분리·누적 학습
+
+Qwen3-0.6B 기반 모델 하나에 긴급도·관련도 LoRA 어댑터를 각각 사용합니다.
+긴급도 입력은 알림만, 관련도 입력은 알림과 현재 창·최근 창 최대 3개입니다.
+추론은 다섯 숫자 후보를 직접 비교하며 카테고리·이유 문장을 생성하지 않습니다.
+
+- 학습 자료: `outputs/v5_training_pool_01/prepared_continual/`의 긴급도 4,936건·관련도 11,771건
+- 최신 어댑터: `outputs/runs/2026-10-05-qwen06-accumulated-01/{urgency,relevance}/adapter/`
+- 직전 어댑터: `outputs/runs/2026-10-05-qwen06-continual-01/{urgency,relevance}/adapter/`
+- V7 관련도 보강 3천 건과 재검수 제안은 아직 기존 학습 자료에 병합하지 않았습니다.
+- 학습·평가 실행: `modeling/digit_score_experiment.py`, 실험 실행 계획: `modeling/run_score_pilot.py`
+- 데이터 준비: `preparation/prepare_digit_supplement.py`, 검사: `quality/audit_digit_training.py`
+
+최신 설정은 유효 배치 8, 1 epoch, 학습률 5e-5, warmup 5%, LoRA rank 8입니다.
+관련 실행은 새로운 출력 폴더를 지정하고 `--dry-run` 사전 점검부터 진행합니다.
+이 프로젝트는 학습 도구 저장소이며 앱의 모델 연결을 자동으로 바꾸지 않습니다.
+
+## 검증
+
+학습 의존성을 설치한 뒤 저장소 루트에서 실행합니다.
+
+```powershell
+python -m unittest discover -s tests/filtering -q
+python -m unittest discover -s filtering_training/checks -q
+```
+
+로컬 `outputs/`가 없는 저장소에서는 실험 자료·어댑터에 의존하는 통합 테스트 11개를
+명시적으로 건너뜁니다. 자료가 있으면 모두 실행하며 불완전하거나 변경된 자료는 실패합니다.
+모델·데이터·실행 로그는 Git에서 제외됩니다. 학습을 이어받으려면 승인 자료·분할·manifest와
+기반 모델 및 해당 어댑터를 별도로 전달받아야 합니다.
 
 ## 실행 예시
 

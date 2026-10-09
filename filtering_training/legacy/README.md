@@ -1,15 +1,14 @@
 # 이전 필터링 실험 코드
 
-현재 v3 데이터 생성·학습 흐름에서 사용하지 않는 이전 실험 코드를 보관합니다.
-삭제하거나 기능을 없앤 것은 아닙니다. 일부는 기존 테스트와 재현에 사용됩니다.
+현재 데이터 생성·학습 흐름의 기본 도구는 아니지만 기존 테스트가 사용하는 이전 코드입니다.
+2026-10-09 사용자 승인으로 참조가 없는 과거 코드 10개를 삭제했습니다.
 
-- `generation/`: 초기·대량·보강·말투 후보 생성
+- `generation/`: `generate_rapid_dataset.py`, `generate_targeted_dataset.py`
 - `preparation/`: 이전 대량 후보 학습 파일 준비
-- `review/`: 이전 검수 양식과 피드백 반영
-- `quality/`: 이전 체류 시간 편향 보정
-- `external/`: 외부 자료 선택·번역·재작성
-- `diagnostics/`: 과거 모델 점검과 정책 예제
+- `external/`: 외부 자료 선택·번역·번역 검사
 - [EXPERIMENTS.md](EXPERIMENTS.md): 기존 긴 README의 실험 이력·명령 안내
+
+처음부터의 날짜순 실험 기록은 [filtering-experiment-log.md](../../docs/filtering-experiment-log.md)입니다.
 
 일반 도구로 다시 활용할 때에는 현재 데이터·정책에 맞게 입력과 인자를 지정해야 합니다.
 현재 사용 여부와 파일별 역할은 [전체 안내](../FILE_GUIDE.md)에 있습니다.
