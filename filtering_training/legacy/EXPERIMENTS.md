@@ -1,5 +1,10 @@
 # Filtering model training
 
+This is a historical README snapshot. Some unused tools and old model weights
+were removed with user approval on 2026-10-09; recorded commands may reference
+deleted artifacts. See `../FILE_GUIDE.md` for cleanup details and
+`../../docs/filtering-experiment-log.md` for the chronological experiment log.
+
 This directory contains offline dataset preparation, validation, model training,
 and evaluation tools for the real-time filtering model.
 

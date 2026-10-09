@@ -38,7 +38,9 @@ GGUF 파일에 4B QLoRA 어댑터의 학습 결과가 포함된 것으로 간주
 
 보관 위치는 `outputs/archive/20260930-before-encoder/historical-experiments.zip`이다.
 각 파일의 기존 경로·크기·SHA-256 및 정리 결과는 같은 폴더의 `manifest.json`에 기록했다.
-ZIP의 모든 파일을 원본과 대조한 후 기존 위치의 파일을 제거했다. 아래 자료는 ZIP에서 복원할 수 있다.
+ZIP의 모든 파일을 원본과 대조한 후 기존 위치의 파일을 제거했다.
+아래는 최초 보관한 실험 목록이다. 2026-10-09 구형 모델 파일을 정리한 이후에는
+각 실험의 설정·로그·학습 경과 기록과 일회성 스크립트만 ZIP에서 복원할 수 있다.
 
 - 초기 0.6B 시험: `lora-smoke`, `lora-smoke-bf16`, `lora-smoke-51`
 - 0.6B 파일럿: `lora-rapid-pilot-100`, `lora-rapid-pilot-500`, `lora-rapid-short-500`
@@ -49,11 +51,15 @@ ZIP의 모든 파일을 원본과 대조한 후 기존 위치의 파일을 제�
   `check_reference_privacy.py`, `compare_real_samples.py`, `create_holdout_draft.py`, `mix_holdout.py`,
   `replace_holdout_log.py`, `rewrite_holdout_realistic.py`, `verify_holdout_log.py`
 
-각 실험의 가중치·설정·로그와 Trainer의 optimizer 상태도 압축본에 보존했다.
-현재 4B 후보의 `adapter/`와 `run_config.json`은 원래 경로에 남아 있다.
-과거 실험 기록에 적힌 경로를 사용하려면 해당 자료를 먼저 복원한다.
+최초 압축본에는 각 실험의 가중치·설정·로그와 Trainer의 optimizer 상태도 포함했다.
+2026-10-09 사용자 승인으로 압축본 안의 구형 가중치·optimizer·토크나이저 등 50개를 제거했다.
+학습 설정·로그·`trainer_state.json`·`training_args.bin`·스크립트 50개는 내용이 동일하다.
+압축본은 256,766,187바이트에서 178,146바이트로 줄었으며 256,588,041바이트를 확보했다.
+`manifest.json`의 현재 파일 목록·압축본 해시를 갱신하고 `model_cleanup`에 삭제 내역과
+이전 요약을 보존했다. 압축본과 보관 목록을 제외한 출력 파일 801개의 SHA-256도 동일하다.
+과거 모델 가중치는 복원할 수 없다. 최신·직전 0.6B 모델과 현재 데이터셋에는 영향이 없다.
 
-## 복원 방법
+## 보존한 기록 복원 방법
 
 저장소 루트에서 아래 명령으로 새 복원 폴더에 압축을 푼다.
 이미 `restored`가 있다면 다른 새 폴더 이름을 사용한다.
@@ -67,7 +73,7 @@ Expand-Archive -LiteralPath filtering_training/outputs/archive/20260930-before-e
 같은 이름의 폴더가 새로 생성되어 있다면 덮어쓰지 말고 별도 위치에서 비교한다.
 일회성 스크립트는 데이터를 수정하거나 실험 문서를 다시 작성할 수 있으므로, 복원만으로 실행하지 않는다.
 
-## 삭제 및 검증 결과
+## 2026-09-30 최초 보관 당시 삭제 및 검증 결과
 
 - 압축 보관: 실험·체크포인트 폴더 10개와 일회성 스크립트 9개, 총 100파일.
 - 압축 전 426,456,592바이트 → 압축 후 256,766,187바이트.
