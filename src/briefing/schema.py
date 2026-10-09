@@ -69,15 +69,6 @@ def _required_string(data: Mapping[str, Any], field: str) -> str:
     return value.strip()
 
 
-def _score(data: Mapping[str, Any], field: str) -> int:
-    value = data.get(field)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ContractValidationError(f"{field} must be an integer from 1 to 5")
-    if not 1 <= value <= 5:
-        raise ContractValidationError(f"{field} must be between 1 and 5")
-    return value
-
-
 def _filter_category(data: Mapping[str, Any]) -> str:
     category = _required_string(data, "category")
     if category not in _FILTER_CATEGORY_SET:
@@ -113,10 +104,8 @@ class RawNotification:
 class FilterResult:
     notification_id: str
     is_passed: bool
-    urgency_score: int
-    relevance_score: int
-    category: str
-    ai_summary_reason: str
+    category: str | None = None
+    ai_summary_reason: str = ""
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "FilterResult":
@@ -126,10 +115,8 @@ class FilterResult:
         return cls(
             notification_id=_required_string(data, "notification_id"),
             is_passed=is_passed,
-            urgency_score=_score(data, "urgency_score"),
-            relevance_score=_score(data, "relevance_score"),
-            category=_filter_category(data),
-            ai_summary_reason=_required_string(data, "ai_summary_reason"),
+            category=_filter_category(data) if data.get("category") is not None else None,
+            ai_summary_reason=str(data.get("ai_summary_reason") or ""),
         )
 
 
@@ -146,17 +133,9 @@ class CategoryDecision:
 
 
 @dataclass(frozen=True, slots=True)
-class ScoreAggregate:
-    minimum: int
-    maximum: int
-    average: float
-
-    def to_dict(self) -> dict[str, int | float]:
-        return {
-            "min": self.minimum,
-            "max": self.maximum,
-            "average": self.average,
-        }
+class BriefingDecision:
+    primary_category: str
+    summary_lines: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,74 +148,67 @@ class BriefingGroup:
     category_evidence_notification_ids: tuple[str, ...]
     notification_ids: tuple[str, ...]
     keywords: tuple[str, ...]
-    urgency: ScoreAggregate
-    relevance: ScoreAggregate
     summary_lines: tuple[str, ...]
+    session_id: str = ""
+    schedule_summaries: tuple[ScheduleSummary, ...] = ()
+    room_name: str | None = None  # Internal report context; not a dashboard field.
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "group_id": self.group_id,
+            "session_id": self.session_id,
             "app_name": self.app_name,
             "sender": self.sender,
-            "time_bucket_start": format_timestamp(self.time_bucket_start),
             "primary_category": self.primary_category,
-            "category_evidence_notification_ids": list(
-                self.category_evidence_notification_ids
-            ),
-            "notification_ids": list(self.notification_ids),
-            "notification_count": len(self.notification_ids),
-            "keywords": list(self.keywords),
-            "urgency_score": self.urgency.to_dict(),
-            "relevance_score": self.relevance.to_dict(),
             "summary_lines": list(self.summary_lines),
+            "schedule_summaries": [
+                summary.to_dict() for summary in self.schedule_summaries
+            ],
         }
 
 
 @dataclass(frozen=True, slots=True)
-class TodoCandidate:
-    """Temporary briefing-local candidate for a user action."""
+class ScheduleDetails:
+    """Source-grounded six-question fields for a schedule notification."""
 
-    candidate_id: str
-    text: str
-    due_at: datetime | None
-    is_all_day: bool
-    source_notification_ids: tuple[str, ...]
-    source_group_ids: tuple[str, ...]
-    matched_cues: tuple[str, ...]
+    who: str | None = None
+    when: str | None = None
+    where: str | None = None
+    what: str | None = None
+    why: str | None = None
+    how: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, str | None]:
         return {
-            "candidate_id": self.candidate_id,
-            "text": self.text,
-            "due_at": format_timestamp(self.due_at) if self.due_at else None,
-            "is_all_day": self.is_all_day,
-            "source_notification_ids": list(self.source_notification_ids),
-            "source_group_ids": list(self.source_group_ids),
-            "matched_cues": list(self.matched_cues),
+            "who": self.who,
+            "when": self.when,
+            "where": self.where,
+            "what": self.what,
+            "why": self.why,
+            "how": self.how,
         }
 
 
 @dataclass(frozen=True, slots=True)
-class CalendarCandidate:
-    """Temporary briefing-local candidate for a calendar event."""
+class ScheduleSummary:
+    """A schedule report that keeps the same six fields even when incomplete."""
 
-    candidate_id: str
+    summary_id: str
     title: str
-    scheduled_at: datetime
-    is_all_day: bool
+    status: str
+    schedule_details: ScheduleDetails
     source_notification_ids: tuple[str, ...]
     source_group_ids: tuple[str, ...]
-    matched_cues: tuple[str, ...]
+    is_all_day: bool | None = None
+    end_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "candidate_id": self.candidate_id,
-            "title": self.title,
-            "scheduled_at": format_timestamp(self.scheduled_at),
+            "summary_id": self.summary_id,
+            "schedule_status": self.status,
             "is_all_day": self.is_all_day,
-            "source_notification_ids": list(self.source_notification_ids),
-            "source_group_ids": list(self.source_group_ids),
-            "matched_cues": list(self.matched_cues),
+            "end_at": self.end_at,
+            **self.schedule_details.to_dict(),
         }
 
 
@@ -248,22 +220,9 @@ class SessionBriefing:
     blocked_notification_count: int
     duplicate_count: int
     groups: tuple[BriefingGroup, ...]
-    todo_candidates: tuple[TodoCandidate, ...] = ()
-    calendar_candidates: tuple[CalendarCandidate, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
-            "generated_at": format_timestamp(self.generated_at),
-            "source_notification_count": self.source_notification_count,
-            "blocked_notification_count": self.blocked_notification_count,
-            "duplicate_count": self.duplicate_count,
-            "group_count": len(self.groups),
             "groups": [group.to_dict() for group in self.groups],
-            "todo_candidate_count": len(self.todo_candidates),
-            "todo_candidates": [candidate.to_dict() for candidate in self.todo_candidates],
-            "calendar_candidate_count": len(self.calendar_candidates),
-            "calendar_candidates": [
-                candidate.to_dict() for candidate in self.calendar_candidates
-            ],
         }

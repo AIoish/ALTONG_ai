@@ -6,14 +6,15 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
-from .categorization import categorize_group
+from .categorization import categorize_group, categorize_text
+from .category_prompt import MAX_NEW_TOKENS, build_messages as build_briefing_messages, parse_response
 from .qwen_prompt import (
     MAX_SUMMARY_LINES,
     MODEL_NAME,
     build_messages,
     parse_summary_response,
 )
-from .schema import BriefingItem, format_timestamp
+from .schema import BriefingDecision, BriefingItem, format_timestamp
 from .summarize import BriefingProvider, RuleBasedBriefingProvider
 
 
@@ -102,10 +103,11 @@ class TransformersQwenBackend:
             generated_ids = model.generate(
                 **model_inputs,
                 max_new_tokens=self._max_new_tokens,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.8,
-                top_k=20,
+                do_sample=False,
+                num_beams=1,
+                temperature=None,
+                top_p=None,
+                top_k=None,
                 pad_token_id=tokenizer.eos_token_id,
             )
 
@@ -120,24 +122,13 @@ def build_group_context(items: Sequence[BriefingItem]) -> dict[str, object]:
         raise ValueError("cannot summarize an empty briefing group")
 
     ordered = sorted(items, key=lambda item: item.notification.timestamp)
-    urgency_values = [item.filter_result.urgency_score for item in ordered]
-    relevance_values = [item.filter_result.relevance_score for item in ordered]
     category = categorize_group(list(ordered)).primary_category
     first = ordered[0].notification
-
-    def score(values: list[int]) -> dict[str, int | float]:
-        return {
-            "min": min(values),
-            "max": max(values),
-            "average": round(sum(values) / len(values), 2),
-        }
 
     return {
         "app_name": first.app_name,
         "sender": first.sender,
         "category": category,
-        "urgency_score": score(urgency_values),
-        "relevance_score": score(relevance_values),
         "notifications": [
             {
                 "id": item.notification.id,
@@ -147,6 +138,21 @@ def build_group_context(items: Sequence[BriefingItem]) -> dict[str, object]:
             }
             for item in ordered
         ],
+    }
+
+
+def build_briefing_context(items: Sequence[BriefingItem]) -> dict[str, object]:
+    if not items:
+        raise ValueError("cannot brief an empty group")
+    ordered = sorted(items, key=lambda item: item.notification.timestamp)
+    first = ordered[0].notification
+    return {
+        "app_name": first.app_name, "sender": first.sender,
+        "notifications": [{
+            "id": item.notification.id,
+            "timestamp": format_timestamp(item.notification.timestamp),
+            "title": item.notification.title, "body": item.notification.body,
+        } for item in ordered],
     }
 
 
@@ -162,19 +168,52 @@ class QwenBriefingProvider:
         fallback_provider: BriefingProvider | None = None,
         max_summary_lines: int = MAX_SUMMARY_LINES,
         allow_fallback: bool = True,
+        contract: str = "briefing",
     ) -> None:
+        if contract not in {"briefing", "summary"}:
+            raise ValueError("contract must be briefing or summary")
+        self._contract = contract
         self._backend = backend or TransformersQwenBackend(
             model_name=model_name,
             adapter_path=adapter_path,
+            max_new_tokens=MAX_NEW_TOKENS if contract == "briefing" else 160,
         )
         self._fallback_provider = fallback_provider or RuleBasedBriefingProvider()
         self._max_summary_lines = max_summary_lines
         self._allow_fallback = allow_fallback
         self._disabled = False
 
+    def brief(self, items: Sequence[BriefingItem]) -> BriefingDecision:
+        """One inference for category + summary; old adapters require summary mode."""
+        if self._contract == "summary":
+            category = categorize_text(list(items)).primary_category
+            return BriefingDecision(category, self.summarize(items))
+        if not items:
+            raise ValueError("cannot brief an empty group")
+        if not self._disabled:
+            try:
+                raw = self._backend.generate(build_briefing_messages(
+                    build_briefing_context(items), max_summary_lines=self._max_summary_lines,
+                ))
+                decision = parse_response(raw)
+                if len(decision.summary_lines) > self._max_summary_lines:
+                    raise ValueError("model exceeded the requested summary line limit")
+                return decision
+            except Exception:
+                if not self._allow_fallback:
+                    raise
+                self._disabled = True
+                LOGGER.exception("Joint briefing failed; using text-based fallback")
+        return BriefingDecision(
+            categorize_text(list(items)).primary_category,
+            self._fallback_provider.summarize(items),
+        )
+
     def summarize(self, items: Sequence[BriefingItem]) -> tuple[str, ...]:
         if not items:
             return ()
+        if self._contract == "briefing":
+            return self.brief(items).summary_lines
         if self._disabled:
             return self._fallback_provider.summarize(items)
 
