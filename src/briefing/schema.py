@@ -104,8 +104,8 @@ class RawNotification:
 class FilterResult:
     notification_id: str
     is_passed: bool
-    category: str
-    ai_summary_reason: str
+    category: str | None = None
+    ai_summary_reason: str = ""
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "FilterResult":
@@ -115,8 +115,8 @@ class FilterResult:
         return cls(
             notification_id=_required_string(data, "notification_id"),
             is_passed=is_passed,
-            category=_filter_category(data),
-            ai_summary_reason=_required_string(data, "ai_summary_reason"),
+            category=_filter_category(data) if data.get("category") is not None else None,
+            ai_summary_reason=str(data.get("ai_summary_reason") or ""),
         )
 
 
@@ -133,6 +133,12 @@ class CategoryDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class BriefingDecision:
+    primary_category: str
+    summary_lines: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class BriefingGroup:
     group_id: str
     app_name: str
@@ -145,6 +151,7 @@ class BriefingGroup:
     summary_lines: tuple[str, ...]
     session_id: str = ""
     schedule_summaries: tuple[ScheduleSummary, ...] = ()
+    room_name: str | None = None  # Internal report context; not a dashboard field.
 
     def to_dict(self) -> dict[str, Any]:
         return {

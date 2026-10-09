@@ -14,6 +14,11 @@ from .prepare_dataset import (
     validate_records,
 )
 from .prompts import MODEL_NAME
+from .prepare_category_dataset import (
+    TRAIN_PATH as CATEGORY_TRAIN_PATH, VALIDATION_PATH as CATEGORY_VALIDATION_PATH,
+    training_messages as category_training_messages,
+    validate_records as validate_category_records,
+)
 
 
 DEFAULT_OUTPUT_DIRECTORY = Path("outputs") / "briefing-qwen-lora"
@@ -34,7 +39,11 @@ def load_records(path: str | Path, *, expected_split: str) -> list[dict[str, Any
             records.append(record)
     if not records:
         raise ValueError(f"{path} must contain at least one record")
-    validate_records(records, expected_split=expected_split)
+    modes = {"primary_category" in record.get("target", {}) for record in records}
+    if len(modes) != 1:
+        raise ValueError("cannot mix summary-only and category+summary training records")
+    validator = validate_category_records if True in modes else validate_records
+    validator(records, expected_split=expected_split)
     return records
 
 
@@ -86,9 +95,11 @@ def validate_resume_checkpoint(path: Path | None) -> Path | None:
 
 
 def to_prompt_completion(record: Mapping[str, Any]) -> dict[str, Any]:
-    messages = training_messages(record)
+    joint = "primary_category" in record.get("target", {})
+    messages = category_training_messages(record) if joint else training_messages(record)
     prompt = [dict(message) for message in messages[:-1]]
-    prompt[-1]["content"] = f"{prompt[-1]['content']}\n/no_think"
+    if not joint:
+        prompt[-1]["content"] = f"{prompt[-1]['content']}\n/no_think"
     return {
         "prompt": prompt,
         "completion": [dict(messages[-1])],
@@ -99,10 +110,12 @@ def render_prompt_completion(
     record: Mapping[str, Any], tokenizer: Any
 ) -> dict[str, str]:
     example = to_prompt_completion(record)
+    template_options = {"enable_thinking": False} if "primary_category" in record.get("target", {}) else {}
     prompt = tokenizer.apply_chat_template(
         example["prompt"],
         tokenize=False,
         add_generation_prompt=True,
+        **template_options,
     )
     completion = example["completion"][0]["content"]
     if tokenizer.eos_token:
@@ -136,7 +149,7 @@ def train(
     from trl import SFTConfig, SFTTrainer
 
     if not torch.cuda.is_available():
-        raise RuntimeError("QLoRA training requires a CUDA GPU; run this command in Colab")
+        raise RuntimeError("QLoRA training requires a CUDA GPU in Colab or a configured local environment")
 
     use_bf16 = torch.cuda.is_bf16_supported()
     compute_dtype = torch.bfloat16 if use_bf16 else torch.float16
@@ -200,6 +213,18 @@ def train(
         peft_config=peft_config,
     )
     trainer.model.print_trainable_parameters()
+    from transformers import TrainerCallback
+
+    task = "briefing" if "primary_category" in train_records[0]["target"] else "summary"
+
+    class ContractCallback(TrainerCallback):
+        def on_save(self, args, state, control, **kwargs):
+            checkpoint_dir = Path(args.output_dir) / f"checkpoint-{state.global_step}"
+            (checkpoint_dir / "briefing_task.json").write_text(
+                json.dumps({"task": task}), encoding="utf-8",
+            )
+
+    trainer.add_callback(ContractCallback())
     result = trainer.train(
         resume_from_checkpoint=(
             str(resume_from_checkpoint) if resume_from_checkpoint else None
@@ -207,6 +232,9 @@ def train(
     )
     trainer.save_model(str(output_directory))
     tokenizer.save_pretrained(output_directory)
+    (output_directory / "briefing_task.json").write_text(
+        json.dumps({"task": task}), encoding="utf-8",
+    )
     trainer.save_metrics("train", result.metrics)
     evaluation_metrics = trainer.evaluate()
     trainer.save_metrics("eval", evaluation_metrics)
@@ -215,9 +243,10 @@ def train(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train-path", type=Path, default=DEFAULT_TRAIN_PATH)
+    parser.add_argument("--task", choices=("briefing", "summary"), default="briefing")
+    parser.add_argument("--train-path", type=Path)
     parser.add_argument(
-        "--validation-path", type=Path, default=DEFAULT_VALIDATION_PATH
+        "--validation-path", type=Path
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIRECTORY)
     parser.add_argument("--epochs", type=float, default=3.0)
@@ -232,18 +261,27 @@ def main() -> None:
     )
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
+    args.train_path = args.train_path or (CATEGORY_TRAIN_PATH if args.task == "briefing" else DEFAULT_TRAIN_PATH)
+    args.validation_path = args.validation_path or (CATEGORY_VALIDATION_PATH if args.task == "briefing" else DEFAULT_VALIDATION_PATH)
 
     train_records = load_records(args.train_path, expected_split="train")
     validation_records = load_records(
         args.validation_path, expected_split="validation"
     )
     validate_split_separation(train_records, validation_records)
+    expected_joint = args.task == "briefing"
+    if any(("primary_category" in record["target"]) != expected_joint for record in [*train_records, *validation_records]):
+        raise ValueError("dataset output contract does not match --task")
     print(
         f"Validated {len(train_records)} training and "
         f"{len(validation_records)} validation cases"
     )
     if args.validate_only:
         return
+    if expected_joint and args.resume_from_checkpoint:
+        state_file = args.resume_from_checkpoint / "briefing_task.json"
+        if not state_file.is_file() or json.loads(state_file.read_text(encoding="utf-8")).get("task") != "briefing":
+            raise ValueError("cannot resume a v5/v6 summary-only checkpoint for the new briefing task")
 
     resume_from_checkpoint = validate_resume_checkpoint(
         args.resume_from_checkpoint

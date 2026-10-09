@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
-from .categorization import categorize_group
+from .categorization import categorize_group, categorize_text
 from .schema import BriefingItem, CategoryDecision, RawNotification
 
 
@@ -31,10 +31,17 @@ class CategoryProvider(Protocol):
 
 
 class RuleBasedCategoryProvider:
-    """Choose a group category after related notifications are assembled."""
+    """Legacy, explicit compatibility with filtering-owned categories."""
 
     def categorize(self, items: Sequence[BriefingItem]) -> CategoryDecision:
         return categorize_group(list(items))
+
+
+class TextCategoryProvider:
+    """Offline source-text fallback for briefing-owned classification."""
+
+    def categorize(self, items: Sequence[BriefingItem]) -> CategoryDecision:
+        return categorize_text(list(items))
 
 
 class RuleBasedBriefingProvider:

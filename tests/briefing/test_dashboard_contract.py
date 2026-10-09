@@ -41,7 +41,7 @@ class DashboardContractTests(unittest.TestCase):
 
         class FakeBackend:
             def generate(self, messages):
-                return json.dumps({"summary_lines": expected_card["summary_lines"]}, ensure_ascii=False)
+                return json.dumps({"primary_category": expected_card["primary_category"], "summary_lines": expected_card["summary_lines"]}, ensure_ascii=False)
 
         service = SessionBriefingService(
             provider=QwenBriefingProvider(backend=FakeBackend(), allow_fallback=False)

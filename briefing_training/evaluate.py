@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from src.briefing.schema import FILTER_CATEGORIES
+from src.briefing.category_prompt import parse_response
+from .prepare_category_dataset import EVALUATION_PATH
 
 from .prompts import MODEL_NAME, parse_summary_response_with_metadata
 from .smoke_test_model import (
@@ -83,7 +85,7 @@ def validate_evaluation_cases(cases: Sequence[Mapping[str, Any]]) -> None:
         group = case.get("input")
         if not isinstance(group, Mapping):
             raise ValueError(f"{case_id} must contain an input object")
-        if group.get("category") not in FILTER_CATEGORIES:
+        if case.get("expected_category", group.get("category")) not in FILTER_CATEGORIES:
             raise ValueError(f"{case_id} has an invalid category")
 
         notifications = group.get("notifications")
@@ -125,6 +127,7 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
         f"- 원본 JSON 계약 준수율: {report['raw_contract_compliance_rate']}",
         f"- 안전 형식 보정률: {report['format_repair_rate']}",
         f"- 사례 통과율: {report['case_pass_rate']}",
+        f"- 카테고리 정확도: {report.get('category_accuracy', '분류 미평가')}",
         f"- 사실 정보 포함률: {report['fact_coverage']}",
         "",
         "아래 데이터는 모두 합성 사례입니다. 자동 점수만 보지 말고 입력 알림, "
@@ -139,6 +142,7 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
                 f"## {index}. {result['case_id']} — {status}",
                 "",
                 f"- 카테고리: {result['category']}",
+                f"- 예측 카테고리: {result.get('predicted_category') or '분류 미평가'}",
                 f"- 핵심 사실: {result['fact_hits']}/{result['fact_total']}",
                 f"- 줄 수 제한 통과: {result['line_limit_passed']}",
                 f"- 출력 형식 자동 보정: {result['format_repaired']}",
@@ -171,7 +175,16 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
+    parser.add_argument("--cases", type=Path)
+    parser.add_argument("--task", choices=("briefing", "summary"), default="summary")
+    parser.add_argument(
+        "--prompt-style", choices=("runtime", "training"), default="runtime",
+        help="compare current runtime formatting with the exact training prompt formatting",
+    )
+    parser.add_argument(
+        "--greedy", action="store_true",
+        help="disable sampling and use greedy decoding for a controlled comparison",
+    )
     parser.add_argument(
         "--adapter-path",
         type=Path,
@@ -188,6 +201,7 @@ def main() -> None:
         help="optional path for a human-readable Markdown review report",
     )
     args = parser.parse_args()
+    args.cases = args.cases or (EVALUATION_PATH if args.task == "briefing" else DEFAULT_CASES_PATH)
 
     cases = load_cases(args.cases)
     validate_evaluation_cases(cases)
@@ -198,6 +212,7 @@ def main() -> None:
     fact_hits = 0
     fact_total = 0
     passed_case_count = 0
+    category_hits = 0
     latencies: list[float] = []
     results: list[dict[str, Any]] = []
 
@@ -214,6 +229,9 @@ def main() -> None:
             group=group,
             max_summary_lines=max_summary_lines,
             seed=42 + index,
+            do_sample=not args.greedy,
+            prompt_style=args.prompt_style,
+            task=args.task,
         )
         latencies.append(elapsed_seconds)
         expected_facts = _expected_facts(case)
@@ -221,9 +239,20 @@ def main() -> None:
         fact_total += len(expected_facts)
 
         try:
-            parsed_response = parse_summary_response_with_metadata(raw_response)
-            summary_lines = parsed_response.summary_lines
-            format_repaired = parsed_response.format_repaired
+            predicted_category = None
+            expected_category = case.get("expected_category", group.get("category"))
+            category_passed = True
+            if args.task == "briefing":
+                decision = parse_response(raw_response)
+                summary_lines = decision.summary_lines
+                predicted_category = decision.primary_category
+                category_passed = predicted_category == expected_category
+                category_hits += int(category_passed)
+                format_repaired = False
+            else:
+                parsed_response = parse_summary_response_with_metadata(raw_response)
+                summary_lines = parsed_response.summary_lines
+                format_repaired = parsed_response.format_repaired
             structured_count += 1
             if format_repaired:
                 format_repair_count += 1
@@ -248,6 +277,8 @@ def main() -> None:
             fact_hits += hits
             error = None
         except ValueError as exc:
+            predicted_category = None
+            category_passed = args.task != "briefing"
             summary_lines = ()
             hits = 0
             missing_expected_facts = [
@@ -263,6 +294,7 @@ def main() -> None:
             and hits == len(expected_facts)
             and not forbidden_hits
             and line_limit_passed
+            and category_passed
         )
         if passed:
             passed_case_count += 1
@@ -270,7 +302,9 @@ def main() -> None:
         results.append(
             {
                 "case_id": case.get("case_id", index),
-                "category": group.get("category"),
+                "category": case.get("expected_category", group.get("category")),
+                "predicted_category": predicted_category,
+                "category_passed": category_passed if args.task == "briefing" else None,
                 "passed": passed,
                 "structured_output": error is None,
                 "raw_contract_compliant": error is None and not format_repaired,
@@ -298,6 +332,10 @@ def main() -> None:
         )
 
     report = {
+        "task": args.task,
+        "category_accuracy": round(category_hits / len(cases), 4) if args.task == "briefing" else None,
+        "generation_mode": "greedy" if args.greedy else "sampling",
+        "prompt_style": args.prompt_style,
         "model": MODEL_NAME,
         "adapter_path": str(args.adapter_path)
         if args.adapter_path is not None

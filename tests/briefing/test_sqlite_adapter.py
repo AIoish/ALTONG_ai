@@ -138,7 +138,8 @@ class SQLiteBriefingAdapterTests(unittest.TestCase):
             filter_results=source.filter_results,
         )
         self.assertEqual(sum(len(group.notification_ids) for group in briefing.groups), 1)
-        self.assertEqual(briefing.to_dict()["groups"][0]["primary_category"], "긴급 업무")
+        # Stored filtering category is no longer the briefing category source.
+        self.assertEqual(briefing.to_dict()["groups"][0]["primary_category"], "기타")
 
     def test_load_session_uses_only_unassigned_rows_inside_focus_period(self) -> None:
         self._insert_focus_session("session_1")

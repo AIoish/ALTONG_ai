@@ -92,7 +92,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
         backend = FakeBackend(
             '{"summary_lines":["로그인 API가 정상화되었습니다."]}'
         )
-        provider = QwenBriefingProvider(backend=backend)
+        provider = QwenBriefingProvider(backend=backend, contract="summary")
 
         summary = provider.summarize(self.items)
 
@@ -106,7 +106,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
         self.assertNotIn('"latest"', prompt)
 
     def test_provider_uses_rule_based_fallback_when_model_fails(self) -> None:
-        provider = QwenBriefingProvider(backend=FailingBackend())
+        provider = QwenBriefingProvider(backend=FailingBackend(), contract="summary")
 
         with self.assertLogs("src.briefing.qwen_provider", level="ERROR"):
             summary = provider.summarize(self.items)
@@ -124,6 +124,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
         provider = QwenBriefingProvider(
             backend=FailingBackend(),
             allow_fallback=False,
+            contract="summary",
         )
 
         with self.assertRaisesRegex(RuntimeError, "synthetic model failure"):
@@ -131,7 +132,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
 
     def test_pipeline_accepts_qwen_provider_without_contract_changes(self) -> None:
         backend = FakeBackend(
-            '{"summary_lines":["로그인 API가 정상화되었습니다."]}'
+            '{"primary_category":"긴급 업무","summary_lines":["로그인 API가 정상화되었습니다."]}'
         )
         service = SessionBriefingService(
             provider=QwenBriefingProvider(backend=backend)

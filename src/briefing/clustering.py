@@ -65,9 +65,22 @@ def normalize_identity(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+def app_identity(value: str) -> str:
+    key = normalize_identity(value)
+    return key[:-4] if key.endswith(".exe") else key
+
+
+def kakao_room_key(item: BriefingItem) -> str | None:
+    """Temporary client agreement: Kakao title is a room name, not an ID."""
+    if app_identity(item.notification.app_name) != "kakaotalk":
+        return None
+    return normalize_identity(item.notification.title)
+
+
 def text_tokens(item: BriefingItem) -> set[str]:
     text = unicodedata.normalize(
-        "NFKC", f"{item.notification.title} {item.notification.body}"
+        "NFKC", item.notification.body if kakao_room_key(item) is not None
+        else f"{item.notification.title} {item.notification.body}"
     ).casefold()
     return {
         token
@@ -112,12 +125,15 @@ class RuleGroup:
     bucket: datetime
     items: list[BriefingItem] = field(default_factory=list)
     tokens: set[str] = field(default_factory=set)
+    room_key: str | None = None
 
     def accepts(self, item: BriefingItem, tokens: set[str]) -> bool:
         notification = item.notification
-        if normalize_identity(notification.app_name) != self.app_key:
+        if app_identity(notification.app_name) != self.app_key:
             return False
         if normalize_identity(notification.sender) != self.sender_key:
+            return False
+        if kakao_room_key(item) != self.room_key:
             return False
         if not self.items:
             return False
@@ -138,9 +154,12 @@ class RuleGroup:
 
         previous = self.items[-1]
         time_gap = notification.timestamp - previous.notification.timestamp
+        # Client IDs may be UUIDs/non-sequential. Known room + sender + close
+        # timestamps can connect fragmented Kakao messages without ID proximity.
+        known_room = self.room_key not in {None, "카카오톡", "kakaotalk"}
         return (
             timedelta(0) <= time_gap <= _MAX_SEQUENCE_GAP
-            and has_adjacent_sequence_id(previous, item)
+            and (known_room or has_adjacent_sequence_id(previous, item))
         )
 
     def add(self, item: BriefingItem, tokens: set[str]) -> None:
@@ -169,9 +188,10 @@ def group_items(items: list[BriefingItem]) -> list[RuleGroup]:
         if matching is None:
             notification = item.notification
             matching = RuleGroup(
-                app_key=normalize_identity(notification.app_name),
+                app_key=app_identity(notification.app_name),
                 sender_key=normalize_identity(notification.sender),
                 bucket=hour_bucket(notification.timestamp),
+                room_key=kakao_room_key(item),
             )
             groups.append(matching)
         matching.add(item, tokens)

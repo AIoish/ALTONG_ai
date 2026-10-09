@@ -61,7 +61,9 @@ python -m briefing_training.smoke_test_runtime_provider `
 
 The briefing pipeline groups same-app, same-sender notification fragments when
 their recognized sequence IDs are adjacent and they arrive within five
-minutes. Sequence proximity is only a supporting signal: unrelated senders,
+minutes. Kakao additionally requires the same room title; for a known Kakao room
+the ID-adjacency requirement is not necessary. Sequence proximity is only a
+supporting signal for other apps: unrelated senders,
 UUID-style IDs, non-adjacent IDs, and missing-sender fallbacks are not merged by
 ID alone. Shared-text grouping is limited to a 30-minute group span.
 
@@ -73,12 +75,17 @@ returned inside its briefing card at `groups[].schedule_summaries`.
 The response contains exactly `session_id` and `groups`. Each group is one
 dashboard card with exactly these seven fields: `session_id`, `group_id`,
 `app_name`, `sender`, `primary_category`, `summary_lines`, and
-`schedule_summaries`. The category is selected from filtering results; groups
+`schedule_summaries`. The category is predicted by the briefing model; groups
 in the same category may still be separate cards.
 
-There is currently no conversation/room identifier or room-name field. `sender`
-is the source-provided sender string, not a separately identified room. Grouping
-uses app, sender, related text, time proximity, and (for fragments) adjacent IDs.
+There is no dedicated conversation ID yet. For KakaoTalk/KakaoTalk.exe only,
+`title` is temporarily interpreted as the room name and must match before
+messages can merge. `sender` remains the source-provided individual sender.
+Grouping uses app, room (Kakao only), sender, body similarity and time proximity.
+Known-room Kakao fragments within five minutes can merge even with UUID or
+non-sequential IDs; a group spans at most 30 minutes. Other apps do not treat
+their notification titles as room identifiers. Same-name rooms, room renaming,
+and missing/fallback room titles remain limitations pending client integration.
 `group_id` hashes the sorted source notification IDs; re-summarizing the same ID
 set preserves it, while adding/removing notifications changes it. `summary_id`
 is derived from `group_id`, not from a persistent calendar event identity.
@@ -158,9 +165,13 @@ The following is a complete example, including every dashboard field:
 - `src/briefing/sqlite_adapter.py:load_session()` reads blocked notifications
   for a focus session. `pipeline.py:build()` validates them, removes duplicates,
   groups them, generates summaries, and extracts schedules.
-- `categorization.py:categorize_group()` chooses the group category.
-  `qwen_provider.py:QwenBriefingProvider.summarize()` generates summary lines.
-  Qwen still outputs only `{"summary_lines":[...]}`, not the dashboard envelope.
+- `qwen_provider.py:QwenBriefingProvider.brief()` predicts the group category and
+  summary in one call. Its direct output has exactly `primary_category` and
+  `summary_lines`, not the dashboard envelope. Filtering supplies pass/block
+  decisions; its category and score values are not model inputs in this mode.
+  The offline fallback classifies source text with conservative rules; it is not
+  evidence of trained classifier quality. Old v5/v6 summary adapters require
+  `contract="summary"` and still do not perform learned classification.
 - `action_items.py:RuleBasedActionItemProvider.extract()` extracts schedule
   fields from source text without registering them in a calendar.
 - The application still needs to invoke this pipeline on session completion,
@@ -183,10 +194,43 @@ python -m unittest discover -s tests -v
 ## Score-free briefing input
 
 Briefing consumes notification identity, source text, timestamps, filtering
-pass/block decisions, and category. Extra filtering score fields are ignored;
+pass/block decisions. Filtering category is optional and not used by the new
+joint model. Extra filtering score fields are ignored;
 Qwen prompts and the rule-based fallback no longer use them. Newly generated
 training records omit scores. Existing dataset files may contain historical
 score fields; these are ignored by the shared prompt builder.
+
+## Category-organized summary report (v7)
+
+The dashboard JSON stays `session_id + groups`; schedule_summaries is calendar
+information inside a card, not the category report itself. `reports.py` collects
+cards by the eight official categories in a fixed order, preserving separate
+senders/rooms and their schedules. This does not call the LLM again or infer a
+room-wide conclusion. `category_report(briefing)` returns a separate optional
+`session_id + categories` JSON projection; `render_category_markdown(briefing)`
+returns the readable report. The existing dashboard contract is unchanged.
+
+Offline structure demo (no model/GPU, not a quality evaluation):
+
+```powershell
+python -m briefing_training.smoke_test_runtime_provider `
+  --rule-based `
+  --notifications data/sample/briefing/category_notifications.json `
+  --filter-results data/sample/briefing/category_filter_results.json `
+  --output outputs/category-dashboard-demo.json `
+  --report-output outputs/category-briefing-demo.md `
+  --category-output outputs/category-report-demo.json
+```
+
+For the trained v7 joint classifier, replace `--rule-based` with
+`--adapter-path "<v7 adapter directory>"`. The fixture includes same-room
+fragments, the same sender in a different room, and a different sender in the
+same room. The reports must be requested explicitly; file writing and session
+completion triggers are application integration responsibilities.
+
+See `briefing_training/README.md` for the separate v7 dataset and training steps.
+Changing the model's task from summary-only to classification+summary requires
+new supervision; v6 checkpoint resumption is not the v7 training workflow.
 
 Changing dashboard serialization alone does not change model inputs. Removing
 scores from prompts does change model inputs, so evaluate the existing adapter

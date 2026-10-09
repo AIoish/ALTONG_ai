@@ -25,7 +25,7 @@ from .summarize import (
     BriefingProvider,
     CategoryProvider,
     RuleBasedBriefingProvider,
-    RuleBasedCategoryProvider,
+    TextCategoryProvider,
 )
 
 
@@ -55,7 +55,7 @@ class SessionBriefingService:
         action_item_provider: ActionItemProvider | None = None,
     ) -> None:
         self._provider = provider or RuleBasedBriefingProvider()
-        self._category_provider = category_provider or RuleBasedCategoryProvider()
+        self._category_provider = category_provider or TextCategoryProvider()
         self._action_item_provider = action_item_provider or RuleBasedActionItemProvider()
 
     def build(
@@ -100,7 +100,9 @@ class SessionBriefingService:
             briefing_group = self._build_group(rule_group)
             extraction = self._action_item_provider.extract(
                 group_id=briefing_group.group_id,
-                items=rule_group.items,
+                items=[replace(item, filter_result=replace(
+                    item.filter_result, category=briefing_group.primary_category,
+                )) for item in rule_group.items],
             )
             groups.append(replace(
                 briefing_group,
@@ -134,15 +136,25 @@ class SessionBriefingService:
 
     def _build_group(self, group: RuleGroup) -> BriefingGroup:
         first = group.items[0].notification
-        category = self._category_provider.categorize(group.items)
+        if hasattr(self._provider, "brief"):
+            decision = self._provider.brief(group.items)
+            primary_category = decision.primary_category
+            summary_lines = decision.summary_lines
+            evidence_ids = tuple(item.notification.id for item in group.items)
+        else:
+            category = self._category_provider.categorize(group.items)
+            primary_category = category.primary_category
+            evidence_ids = category.evidence_notification_ids
+            summary_lines = self._provider.summarize(group.items)
         return BriefingGroup(
             group_id=_group_id(group),
             app_name=first.app_name,
             sender=first.sender,
             time_bucket_start=group.bucket,
-            primary_category=category.primary_category,
-            category_evidence_notification_ids=category.evidence_notification_ids,
+            primary_category=primary_category,
+            category_evidence_notification_ids=evidence_ids,
             notification_ids=tuple(item.notification.id for item in group.items),
             keywords=representative_keywords(group),
-            summary_lines=self._provider.summarize(group.items),
+            summary_lines=summary_lines,
+            room_name=first.title if group.room_key is not None else None,
         )

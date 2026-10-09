@@ -80,8 +80,7 @@ class SQLiteBriefingAdapter:
                 {
                     "notification_id": notification_id,
                     "is_passed": False,
-                    "category": row["category"],
-                    "ai_summary_reason": row["ai_summary_reason"],
+                    "ai_summary_reason": row["ai_summary_reason"] or "",
                 }
             )
 
@@ -134,7 +133,7 @@ class SQLiteBriefingAdapter:
     ) -> list[sqlite3.Row]:
         fields = """
             id, app_name, sender, title, body, received_at,
-            category, ai_summary_reason,
+            ai_summary_reason,
             session_id
         """
 

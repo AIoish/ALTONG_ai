@@ -1,0 +1,8 @@
+[
+  {"id":"demo-a","app_name":"KakaoTalk.exe","sender":"가상 팀장","title":"프로젝트방","body":"참석자는 개발팀입니다. 회의 내일 할게요.","timestamp":"2026-10-08T09:56:00Z"},
+  {"id":"demo-b","app_name":"KakaoTalk.exe","sender":"가상 팀장","title":"프로젝트방","body":"오후 1시부터 2시까지요.","timestamp":"2026-10-08T09:57:00Z"},
+  {"id":"demo-c","app_name":"KakaoTalk.exe","sender":"가상 팀장","title":"프로젝트방","body":"장소는 창의관 402호입니다.","timestamp":"2026-10-08T09:58:00Z"},
+  {"id":"demo-d","app_name":"KakaoTalk.exe","sender":"가상 팀장","title":"동아리방","body":"행사 안내문 검토해서 올려 주세요.","timestamp":"2026-10-08T09:59:00Z"},
+  {"id":"demo-e","app_name":"KakaoTalk.exe","sender":"가상 팀원","title":"프로젝트방","body":"발표 자료 업로드 완료했습니다.","timestamp":"2026-10-08T10:00:00Z"},
+  {"id":"demo-f","app_name":"Slack","sender":"가상 보안팀","title":"계정 보호 조치","body":"비밀번호 재설정이 완료되어 모든 기기에서 로그아웃했습니다.","timestamp":"2026-10-08T10:01:00Z"}
+]

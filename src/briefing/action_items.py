@@ -20,6 +20,14 @@ from .schema import (
     ScheduleSummary,
     format_timestamp,
 )
+from .clustering import app_identity
+
+
+def _source_text(item: BriefingItem) -> str:
+    notification = item.notification
+    if app_identity(notification.app_name) == "kakaotalk":
+        return notification.body
+    return f"{notification.title} {notification.body}"
 
 
 _CALENDAR_CUES = (
@@ -36,6 +44,10 @@ _CALENDAR_CUES = (
     "세미나",
     "행사",
     "제출",
+    "만나요",
+    "스터디",
+    "멘토링",
+    "오리엔테이션",
 )
 _SCHEDULE_TIMEZONE = timezone(timedelta(hours=9), name="Asia/Seoul")
 _RELATIVE_DAYS = {"오늘": 0, "내일": 1, "모레": 2}
@@ -236,7 +248,7 @@ def _parse_group_temporal(items: Sequence[BriefingItem]) -> _TemporalMatch | Non
 
     for item in items:
         notification = item.notification
-        text = f"{notification.title} {notification.body}"
+        text = _source_text(item)
         base = notification.timestamp.astimezone(_SCHEDULE_TIMEZONE)
         clocks = _clock_matches(text)
         time_range = _time_range(text, clocks)
@@ -335,7 +347,7 @@ def _natural_who_what(text: str) -> tuple[str | None, str | None]:
 def _calendar_status(items: Sequence[BriefingItem]) -> str:
     status = "scheduled"
     for item in items:
-        text = _normalize(f"{item.notification.title} {item.notification.body}")
+        text = _normalize(_source_text(item))
         matches = [
             *((text.rfind(cue), "cancelled") for cue in _CANCELLED_CUES),
             *((text.rfind(cue), "changed") for cue in _CHANGED_CUES),
@@ -353,10 +365,12 @@ def _calendar_title(items: Sequence[BriefingItem]) -> str:
     if natural_what:
         return natural_what
     for item in items:
-        source_text = f"{item.notification.title} {item.notification.body}"
+        source_text = _source_text(item)
         if _matched_cues(source_text, _CALENDAR_CUES):
-            return item.notification.title
-    return items[0].notification.title
+            return (item.notification.body if app_identity(item.notification.app_name) == "kakaotalk"
+                    else item.notification.title)
+    return (items[0].notification.body if app_identity(items[0].notification.app_name) == "kakaotalk"
+            else items[0].notification.title)
 
 
 def _schedule_details(
@@ -365,9 +379,7 @@ def _schedule_details(
     title: str,
     temporal: _TemporalMatch | None,
 ) -> ScheduleDetails:
-    combined = " ".join(
-        f"{item.notification.title}. {item.notification.body}" for item in items
-    )
+    combined = " ".join(_source_text(item) for item in items)
     natural_who, natural_what = _natural_who_what(combined)
     why = _extract_detail(_WHY_PATTERN, combined)
     if why is None:
@@ -410,16 +422,18 @@ class RuleBasedActionItemProvider:
         ordered = tuple(sorted(items, key=lambda item: item.notification.timestamp))
         if not ordered:
             return ScheduleExtraction()
-        combined_text = " ".join(
-            f"{item.notification.title} {item.notification.body}" for item in ordered
-        )
-        is_schedule = bool(_matched_cues(combined_text, _CALENDAR_CUES)) or any(
+        combined_text = " ".join(_source_text(item) for item in ordered)
+        temporal = _parse_group_temporal(ordered)
+        cues = _matched_cues(combined_text, _CALENDAR_CUES)
+        # Uploading presentation material or reviewing an event notice is not
+        # itself an appointment. Weak action nouns need a parsed date/time.
+        strong_cues = set(cues) - {"발표", "행사", "제출"}
+        is_schedule = bool(strong_cues or (cues and temporal)) or any(
             item.filter_result.category == "일정/회의" for item in ordered
         )
         if not is_schedule:
             return ScheduleExtraction()
 
-        temporal = _parse_group_temporal(ordered)
         title = _calendar_title(ordered)
         summary = ScheduleSummary(
             summary_id=_candidate_id("schedule", group_id),

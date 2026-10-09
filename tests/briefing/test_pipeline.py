@@ -7,6 +7,7 @@ import unittest
 
 from src.briefing.pipeline import SessionBriefingService
 from src.briefing.schema import ContractValidationError, FILTER_CATEGORIES
+from src.briefing.summarize import RuleBasedCategoryProvider
 
 
 FIXTURE_DIR = (
@@ -171,9 +172,10 @@ class BriefingPipelineTests(unittest.TestCase):
             self.assertNotIn("calendar_candidates", card)
 
     def test_only_official_filter_categories_are_accepted(self) -> None:
+        legacy = SessionBriefingService(category_provider=RuleBasedCategoryProvider())
         for category in FILTER_CATEGORIES:
             with self.subTest(category=category):
-                briefing = self.service.build(
+                briefing = legacy.build(
                     session_id="session_official_category",
                     notifications=[notification("n1")],
                     filter_results=[filter_result("n1", category=category)],
@@ -262,7 +264,7 @@ class BriefingPipelineTests(unittest.TestCase):
                 "chat_001",
                 app="KakaoTalk",
                 sender="가상 팀원",
-                title="첫말",
+                title="프로젝트방",
                 body="내일 보자.",
                 timestamp="2026-09-13T18:59:00Z",
             ),
@@ -270,7 +272,7 @@ class BriefingPipelineTests(unittest.TestCase):
                 "chat_002",
                 app="KakaoTalk",
                 sender="가상 팀원",
-                title="둘째말",
+                title="프로젝트방",
                 body="오후 세 시고.",
                 timestamp="2026-09-13T19:01:00Z",
             ),
@@ -278,7 +280,7 @@ class BriefingPipelineTests(unittest.TestCase):
                 "chat_003",
                 app="KakaoTalk",
                 sender="가상 팀원",
-                title="마지막말",
+                title="프로젝트방",
                 body="B강의실로 와.",
                 timestamp="2026-09-13T19:03:00Z",
             ),
@@ -496,6 +498,7 @@ class BriefingPipelineTests(unittest.TestCase):
         self.assertEqual(len(briefing["groups"]), 2)
 
     def test_category_is_decided_after_grouping_and_latest_breaks_tie(self) -> None:
+        self.service = SessionBriefingService(category_provider=RuleBasedCategoryProvider())
         notifications = [
             notification(
                 "n1",
@@ -525,6 +528,7 @@ class BriefingPipelineTests(unittest.TestCase):
         self.assertEqual(group.category_evidence_notification_ids, ("n2",))
 
     def test_group_category_uses_majority_before_latest_notification(self) -> None:
+        self.service = SessionBriefingService(category_provider=RuleBasedCategoryProvider())
         notifications = [
             notification("n1", timestamp="2026-09-13T18:05:00Z"),
             notification("n2", timestamp="2026-09-13T18:15:00Z"),
@@ -617,7 +621,7 @@ class BriefingPipelineTests(unittest.TestCase):
         ).to_dict()
         self.assertNotIn("urgency_score", server)
         self.assertNotIn("relevance_score", server)
-        self.assertEqual(server["primary_category"], "일반 업무")
+        self.assertEqual(server["primary_category"], "긴급 업무")
         self.assertLessEqual(len(server["summary_lines"]), 3)
 
     def test_legacy_timezone_less_timestamp_is_accepted_and_output_as_utc(self) -> None:

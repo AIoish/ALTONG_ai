@@ -1,5 +1,77 @@
 # Briefing model experiments
 
+## Current workflow: v7 briefing-owned classification + category report
+
+The default application Qwen contract now predicts `primary_category` and
+`summary_lines` together. Upstream filtering categories are no longer provided
+to this model. `schedule_summaries` is populated separately by source-text
+schedule extraction. A category report collects the resulting cards under
+category headings; it is not another calendar field or a second LLM summary.
+
+Existing v5/v6 adapters and the original datasets are preserved for summary-only
+regression comparisons. They have NOT been trained to classify categories.
+Do not resume their checkpoints for v7. Start a new adapter directory.
+
+Prepare the separate dataset (1,200 train / 160 validation / 30 evaluation):
+
+```powershell
+python -m briefing_training.prepare_category_dataset
+python -m briefing_training.train_lora --task briefing --validate-only
+```
+
+Files are under `briefing_training/data/category_briefing/`. The existing
+synthetic labels move from `input.category` to `target.primary_category`;
+evaluation labels live in `expected_category` outside the model input.
+Existing labels are reused, not newly human-validated classification labels.
+Review ambiguous categories (for example, appointment vs meeting, promotion vs
+event, security vs urgent incident) before claiming deployment-quality results.
+The category dataset is a schema/task migration, not 1,200 newly authored cases.
+For Kakao training inputs, titles become neutral room names and old title-only
+subject text is retained in message bodies. Other apps retain their titles.
+
+Laptop PowerShell (reuse the working Python 3.12 GPU environment):
+
+```powershell
+$briefingPython = "C:\dev\ALTONG_ai_train_v5\.venv\Scripts\python.exe"
+& $briefingPython -m briefing_training.train_lora `
+  --task briefing `
+  --output-dir "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v7-local" `
+  --epochs 3 --batch-size 2 --gradient-accumulation-steps 8 `
+  --learning-rate 0.0001 --max-length 2048
+```
+
+After training, assess BOTH classification and summary quality without sampling:
+
+```powershell
+& $briefingPython -m briefing_training.evaluate `
+  --task briefing --greedy `
+  --adapter-path "C:\dev\ALTONG_models\briefing-qwen-lora-conversation-v7-local" `
+  --output outputs/v7-category-evaluation.json `
+  --review-output outputs/v7-category-evaluation-review.md
+```
+
+Evaluation reports `category_accuracy` and per-case predicted/expected category,
+alongside summary-fact coverage. A case passes only if both category and summary
+checks pass. The 30-case benchmark is small and synthetic: category accuracy
+here does not establish real-world accuracy.
+
+Training, evaluation and production use the same explicit non-thinking template
+and greedy evaluation/production generation for this task. Old `--prompt-style`
+differences below apply only to the legacy summary task.
+
+Once a v7 checkpoint is saved, resumption is supported with the same arguments
+and `--resume-from-checkpoint "<v7 checkpoint directory>"`. Checkpoints include
+`briefing_task.json`; v5/v6 checkpoints are rejected for the new task.
+
+See the root README for category-report export. Use `--contract summary` in the
+runtime smoke tool to inspect an old adapter; classification then uses the
+explicit offline text fallback, not the old filtering category.
+
+## Legacy summary-only workflow
+
+The sections below describe v5/v6 data and summary-only evaluations.
+For legacy training/validation commands, explicitly add `--task summary`.
+
 This directory contains offline prompt experiments and evaluation tools for
 group-level notification summaries. Application runtime code remains in
 `src/briefing`, and runtime code must not import from `briefing_training`.
@@ -114,6 +186,21 @@ directory); do not resume a v5 trainer checkpoint with this changed dataset.
 Keep the v5 adapter and its evaluation results for comparison. This does not
 change the public dashboard JSON or the runtime prompt.
 
+For a controlled adapter comparison, pass `--greedy` to
+`python -m briefing_training.evaluate` for both v5 and v6. This disables
+sampling (single-beam greedy decoding), records `generation_mode: "greedy"`
+in the JSON report, and leaves the existing sampling default unchanged.
+Use separate result paths to preserve previous reports. It does not guarantee
+bitwise identical results across different hardware/library environments and
+does not alter training or the application runtime provider.
+
+To isolate the training/inference template difference, evaluate the same adapter
+with `--greedy --prompt-style training` and compare it with the default
+`--greedy --prompt-style runtime`. Training style appends `/no_think` and uses
+the tokenizer's default assistant prefix exactly as the training renderer does.
+It never includes reference answers in the input. Reports record `prompt_style`;
+this diagnostic option does not change application behavior or model weights.
+
 To create a smaller temporary dataset, override the exact record counts:
 
 ```powershell
@@ -127,7 +214,7 @@ python -m briefing_training.prepare_dataset `
 Validate the generated fine-tuning records without loading a model:
 
 ```powershell
-python -m briefing_training.train_lora --validate-only
+python -m briefing_training.train_lora --task summary --validate-only
 ```
 
 ## Train a QLoRA adapter in Colab
@@ -153,6 +240,7 @@ checkpoint instead of restarting all epochs:
 
 ```powershell
 python -m briefing_training.train_lora `
+  --task summary `
   --output-dir /content/drive/MyDrive/ALTONG_models/briefing-qwen-lora `
   --resume-from-checkpoint /content/drive/MyDrive/ALTONG_models/briefing-qwen-lora/checkpoint-150
 ```
