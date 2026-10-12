@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import date, timedelta
 import json
 from pathlib import Path
+import re
 from typing import Any, Mapping, Sequence
 
 from src.briefing.schema import FILTER_CATEGORIES
@@ -32,11 +34,9 @@ class Scenario:
     notifications: tuple[NotificationTemplate, ...]
     target_lines: tuple[str, ...]
     max_summary_lines: int
-    urgency: tuple[int, int, float]
-    relevance: tuple[int, int, float]
 
 
-SCENARIOS = (
+BASE_SCENARIOS = (
     Scenario(
         name="service_recovery",
         category="긴급 업무",
@@ -53,8 +53,6 @@ SCENARIOS = (
         ),
         target_lines=("{subject} 장애가 복구되어 정상화되었습니다.",),
         max_summary_lines=1,
-        urgency=(4, 5, 4.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="task_completed",
@@ -72,8 +70,6 @@ SCENARIOS = (
         ),
         target_lines=("{subject}를 {place}에 업로드했습니다.",),
         max_summary_lines=1,
-        urgency=(2, 3, 2.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="meeting_cancelled",
@@ -91,8 +87,6 @@ SCENARIOS = (
         ),
         target_lines=("{date} {time} {subject}가 취소되었습니다.",),
         max_summary_lines=1,
-        urgency=(2, 4, 3.0),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="security_login",
@@ -113,8 +107,6 @@ SCENARIOS = (
             "본인이 아니라면 즉시 비밀번호를 변경해야 합니다.",
         ),
         max_summary_lines=2,
-        urgency=(5, 5, 5.0),
-        relevance=(5, 5, 5.0),
     ),
     Scenario(
         name="appointment_cancelled",
@@ -132,8 +124,6 @@ SCENARIOS = (
         ),
         target_lines=("{date} {time} {subject} 예약이 취소되었습니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="delivery_completed",
@@ -147,12 +137,10 @@ SCENARIOS = (
         ),
         notifications=(
             NotificationTemplate("{subject} 배송 시작", "{subject} 배송이 시작되었습니다."),
-            NotificationTemplate("{subject} 배송 완료", "{subject}이 {place}에 배송 완료되었습니다."),
+            NotificationTemplate("{subject} 배송 완료", "배송 물품 {subject}이 {place}에 도착했습니다."),
         ),
-        target_lines=("{subject}이 {place}에 배송 완료되었습니다.",),
+        target_lines=("배송 물품 {subject}이 {place}에 도착했습니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(2, 3, 2.5),
     ),
     Scenario(
         name="promotion_extended",
@@ -170,8 +158,6 @@ SCENARIOS = (
         ),
         target_lines=("{subject}이 {new_date}까지 연장되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 2, 1.5),
-        relevance=(1, 3, 2.0),
     ),
     Scenario(
         name="notice_corrected",
@@ -189,8 +175,6 @@ SCENARIOS = (
         ),
         target_lines=("{subject} 장소가 {place}로 정정되었습니다.",),
         max_summary_lines=1,
-        urgency=(1, 3, 2.0),
-        relevance=(2, 4, 3.0),
     ),
     Scenario(
         name="deadline_extended",
@@ -208,8 +192,6 @@ SCENARIOS = (
         ),
         target_lines=("{subject} 제출 기한이 {new_date} {time}로 연장되었습니다.",),
         max_summary_lines=1,
-        urgency=(3, 4, 3.5),
-        relevance=(4, 5, 4.5),
     ),
     Scenario(
         name="submission_details",
@@ -222,43 +204,711 @@ SCENARIOS = (
             {"app": "LMS", "sender": "가상 강사", "subject": "최종 프로젝트", "artifact": "발표 자료와 저장소 링크"},
         ),
         notifications=(
-            NotificationTemplate("{subject} 제출 안내", "{subject}은 {date} {time}까지 제출해 주세요."),
+            NotificationTemplate("{subject} 제출 안내", "{subject} 제출 마감은 {date} {time}입니다."),
             NotificationTemplate("{subject} 제출 형식", "{artifact}를 함께 제출해야 합니다."),
         ),
         target_lines=(
-            "{subject}은 {date} {time}까지 제출해야 합니다.",
+            "{subject} 제출 마감은 {date} {time}입니다.",
             "{artifact}를 함께 제출해야 합니다.",
         ),
         max_summary_lines=2,
-        urgency=(3, 4, 3.5),
-        relevance=(5, 5, 5.0),
+    ),
+    Scenario(
+        name="fragmented_schedule_chat",
+        category="일정/회의",
+        variants=(
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 스터디장",
+                "subject": "AI 스터디",
+                "who": "프로젝트 팀원들",
+                "place": "B강의실",
+                "reason": "발표 순서 조정",
+                "method": "대면",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 팀장",
+                "subject": "기획 회의",
+                "who": "기획팀과 개발팀",
+                "place": "회의실 2",
+                "reason": "요구사항 확정",
+                "method": "대면",
+            },
+            {
+                "app": "Slack",
+                "sender": "가상 프로젝트 리더",
+                "subject": "진행 상황 공유회",
+                "who": "프로젝트 참여자들",
+                "place": "온라인 회의실",
+                "reason": "중간 결과 공유",
+                "method": "화상",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 조교",
+                "subject": "과제 질의응답",
+                "who": "수강생들",
+                "place": "공학관 301호",
+                "reason": "제출 전 질문 정리",
+                "method": "대면",
+            },
+            {
+                "app": "Teams",
+                "sender": "가상 운영자",
+                "subject": "서비스 회고",
+                "who": "운영팀 전원",
+                "place": "온라인 회의실",
+                "reason": "장애 대응 과정 점검",
+                "method": "화상",
+            },
+        ),
+        notifications=(
+            NotificationTemplate(
+                "{sender}", "참석자는 {who}이고 {subject}를 진행합니다."
+            ),
+            NotificationTemplate("{sender}", "{date} {time}에 만나요."),
+            NotificationTemplate("{sender}", "장소는 {place}입니다."),
+            NotificationTemplate(
+                "{sender}", "진행 이유는 {reason}이고 {method} 방식입니다."
+            ),
+        ),
+        target_lines=(
+            "{subject} 일정은 {date} {time} {place}이며 참석자는 {who}입니다.",
+            "진행 이유는 {reason}이고 {method} 방식입니다.",
+        ),
+        max_summary_lines=2,
+    ),
+    Scenario(
+        name="fragmented_task_chat",
+        category="일반 업무",
+        variants=(
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 팀장",
+                "subject": "발표 자료 수정",
+                "artifact": "수정본과 검토 의견",
+                "place": "팀 공유 폴더",
+            },
+            {
+                "app": "Slack",
+                "sender": "가상 리뷰어",
+                "subject": "결제 모듈 코드 보완",
+                "artifact": "PR 링크와 테스트 결과",
+                "place": "개발 채널",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 동료",
+                "subject": "회의록 정리",
+                "artifact": "회의록과 결정 사항",
+                "place": "팀 드라이브",
+            },
+            {
+                "app": "Teams",
+                "sender": "가상 기획자",
+                "subject": "요구사항 문서 갱신",
+                "artifact": "변경 내역과 최신 문서",
+                "place": "프로젝트 보드",
+            },
+            {
+                "app": "KakaoTalk",
+                "sender": "가상 멘토",
+                "subject": "모델 평가 결과 정리",
+                "artifact": "평가 표와 실패 사례",
+                "place": "공유 문서함",
+            },
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 부탁드려요."),
+            NotificationTemplate("{sender}", "{date} {time}까지예요."),
+            NotificationTemplate("{sender}", "{artifact}도 같이 올려 주세요."),
+            NotificationTemplate("{sender}", "{place}에 올리면 됩니다."),
+        ),
+        target_lines=(
+            "{subject} 작업 마감은 {date} {time}입니다.",
+            "필요 자료는 {artifact}이며 업로드 위치는 {place}입니다.",
+        ),
+        max_summary_lines=2,
     ),
 )
 
 
+ADDITIONAL_SCENARIOS = (
+    Scenario(
+        name="fragmented_deployment_rollback",
+        category="긴급 업무",
+        variants=(
+            {"app": "Slack", "sender": "가상 배포팀", "subject": "결제 서비스"},
+            {"app": "Teams", "sender": "가상 플랫폼팀", "subject": "검색 서비스"},
+            {"app": "Slack", "sender": "가상 백엔드팀", "subject": "회원 API"},
+            {"app": "Teams", "sender": "가상 운영팀", "subject": "파일 서비스"},
+            {"app": "Slack", "sender": "가상 릴리스팀", "subject": "주문 서비스"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 신규 버전 배포에 실패했어요."),
+            NotificationTemplate("{sender}", "추가 배포는 우선 중단했습니다."),
+            NotificationTemplate("{sender}", "이전 버전으로 롤백하고 있어요."),
+            NotificationTemplate("{sender}", "안정화 확인 후 다시 공유하겠습니다."),
+        ),
+        target_lines=("{subject} 배포가 실패해 이전 버전으로 롤백하고 있습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="database_failover",
+        category="긴급 업무",
+        variants=(
+            {"app": "PagerDuty", "sender": "가상 DBA팀", "subject": "주문 데이터베이스"},
+            {"app": "Slack", "sender": "가상 인프라팀", "subject": "회원 데이터베이스"},
+            {"app": "Teams", "sender": "가상 데이터팀", "subject": "분석 데이터베이스"},
+            {"app": "PagerDuty", "sender": "가상 운영팀", "subject": "정산 데이터베이스"},
+            {"app": "Slack", "sender": "가상 SRE팀", "subject": "재고 데이터베이스"},
+        ),
+        notifications=(
+            NotificationTemplate("{subject} 연결 오류", "{subject} 연결 오류가 반복되고 있습니다."),
+            NotificationTemplate("{subject} 장애 조치", "대기 장비로 전환해 {subject} 연결이 복구되었습니다."),
+        ),
+        target_lines=("{subject}를 대기 장비로 전환해 연결을 복구했습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_suspicious_device_blocked",
+        category="시스템/보안",
+        variants=(
+            {"app": "Security Center", "sender": "가상 보안팀", "subject": "서울", "device": "Windows PC"},
+            {"app": "Account", "sender": "가상 계정보호팀", "subject": "대구", "device": "Android 기기"},
+            {"app": "Security Center", "sender": "가상 인증팀", "subject": "울산", "device": "iPhone"},
+            {"app": "Account", "sender": "가상 보안 봇", "subject": "수원", "device": "MacBook"},
+            {"app": "Security Center", "sender": "가상 보안센터", "subject": "세종", "device": "Linux PC"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject}의 {device}에서 의심스러운 로그인이 감지됐어요."),
+            NotificationTemplate("{sender}", "본인 활동이 아닌 것으로 확인됐습니다."),
+            NotificationTemplate("{sender}", "해당 {device}는 차단했어요."),
+            NotificationTemplate("{sender}", "모든 로그인 세션도 종료했습니다."),
+        ),
+        target_lines=(
+            "{subject}의 {device}에서 의심스러운 로그인이 감지되었습니다.",
+            "해당 기기를 차단하고 모든 로그인 세션을 종료했습니다.",
+        ),
+        max_summary_lines=2,
+    ),
+    Scenario(
+        name="password_reset_completed",
+        category="시스템/보안",
+        variants=(
+            {"app": "Account", "sender": "가상 계정팀", "subject": "학교 포털"},
+            {"app": "Security Center", "sender": "가상 인증팀", "subject": "업무 계정"},
+            {"app": "Account", "sender": "가상 고객센터", "subject": "쇼핑 계정"},
+            {"app": "Security Center", "sender": "가상 보안팀", "subject": "개발자 계정"},
+            {"app": "Account", "sender": "가상 서비스팀", "subject": "커뮤니티 계정"},
+        ),
+        notifications=(
+            NotificationTemplate("비밀번호 재설정 요청", "{subject} 비밀번호 재설정 요청이 접수되었습니다."),
+            NotificationTemplate("비밀번호 변경 완료", "{subject} 비밀번호 변경이 완료되어 기존 세션이 종료되었습니다."),
+        ),
+        target_lines=("{subject} 비밀번호 변경이 완료되어 기존 세션이 종료되었습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="payment_due",
+        category="개인 중요",
+        variants=(
+            {"app": "Finance", "sender": "가상 카드사", "subject": "카드 대금"},
+            {"app": "Banking", "sender": "가상 은행", "subject": "대출 이자"},
+            {"app": "Utility", "sender": "가상 전력사", "subject": "전기 요금"},
+            {"app": "Finance", "sender": "가상 보험사", "subject": "보험료"},
+            {"app": "Utility", "sender": "가상 통신사", "subject": "통신 요금"},
+        ),
+        notifications=(
+            NotificationTemplate("{subject} 납부 안내", "{subject} 납부 기한은 {date}입니다."),
+            NotificationTemplate("{subject} 납부 예정", "{date} {time}에 등록 계좌에서 {subject} 자동 납부가 진행됩니다."),
+        ),
+        target_lines=("{subject} 자동 납부는 {date} {time}에 등록 계좌에서 진행될 예정입니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_travel_schedule_changed",
+        category="개인 중요",
+        variants=(
+            {"app": "Travel", "sender": "가상 항공사", "subject": "제주행 항공편", "place": "3번 탑승구"},
+            {"app": "Rail", "sender": "가상 철도사", "subject": "부산행 열차", "place": "5번 승강장"},
+            {"app": "Travel", "sender": "가상 버스사", "subject": "대전행 버스", "place": "12번 승차장"},
+            {"app": "Travel", "sender": "가상 여행사", "subject": "공항 셔틀", "place": "호텔 정문"},
+            {"app": "Rail", "sender": "가상 교통센터", "subject": "광주행 열차", "place": "2번 승강장"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 출발 일정이 변경됐어요."),
+            NotificationTemplate("{sender}", "새 출발 시각은 {date} {time}입니다."),
+            NotificationTemplate("{sender}", "탑승 장소는 {place}예요."),
+            NotificationTemplate("{sender}", "변경된 일정으로 이용해 주세요."),
+        ),
+        target_lines=("{subject} 출발 일정은 {date} {time}이며 탑승 장소는 {place}입니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="refund_completed",
+        category="개인 일반",
+        variants=(
+            {"app": "Shopping", "sender": "가상 쇼핑몰", "subject": "운동화"},
+            {"app": "Store", "sender": "가상 서점", "subject": "도서"},
+            {"app": "Shopping", "sender": "가상 마켓", "subject": "생활용품"},
+            {"app": "Store", "sender": "가상 전자상가", "subject": "충전기"},
+            {"app": "Shopping", "sender": "가상 의류몰", "subject": "재킷"},
+        ),
+        notifications=(
+            NotificationTemplate("{subject} 환불 접수", "{subject} 환불 요청이 접수되었습니다."),
+            NotificationTemplate("{subject} 환불 완료", "{subject} 결제 취소와 환불 처리가 완료되었습니다."),
+        ),
+        target_lines=("{subject} 결제 취소와 환불 처리가 완료되었습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_subscription_renewal",
+        category="개인 일반",
+        variants=(
+            {"app": "Subscription", "sender": "가상 음악 서비스", "subject": "음악 이용권"},
+            {"app": "Subscription", "sender": "가상 영상 서비스", "subject": "영상 이용권"},
+            {"app": "Cloud", "sender": "가상 클라우드", "subject": "저장 공간 요금제"},
+            {"app": "Learning", "sender": "가상 학습 서비스", "subject": "온라인 강의 이용권"},
+            {"app": "Subscription", "sender": "가상 뉴스 서비스", "subject": "뉴스 구독권"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 갱신일이 다가오고 있어요."),
+            NotificationTemplate("{sender}", "{date}에 자동 갱신될 예정입니다."),
+            NotificationTemplate("{sender}", "등록된 결제 수단으로 결제돼요."),
+            NotificationTemplate("{sender}", "갱신 전에 결제 수단을 확인해 주세요."),
+        ),
+        target_lines=("{subject} 자동 갱신은 {date}이며 결제 수단을 확인해야 합니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_coupon_expiring",
+        category="광고/홍보",
+        variants=(
+            {"app": "Shopping", "sender": "가상 쇼핑몰", "subject": "신규 회원 쿠폰"},
+            {"app": "Store", "sender": "가상 카페", "subject": "음료 할인 쿠폰"},
+            {"app": "Shopping", "sender": "가상 마켓", "subject": "무료 배송 쿠폰"},
+            {"app": "Store", "sender": "가상 서점", "subject": "도서 할인 쿠폰"},
+            {"app": "Shopping", "sender": "가상 브랜드몰", "subject": "생일 쿠폰"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject}이 계정에 발급됐어요."),
+            NotificationTemplate("{sender}", "아직 사용하지 않은 상태입니다."),
+            NotificationTemplate("{sender}", "사용 기한은 {date}까지예요."),
+            NotificationTemplate("{sender}", "기한이 지나면 자동으로 만료됩니다."),
+        ),
+        target_lines=("{subject}은 {date}에 만료됩니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="promotion_started",
+        category="광고/홍보",
+        variants=(
+            {"app": "Shopping", "sender": "가상 패션몰", "subject": "가을 의류 할인"},
+            {"app": "Store", "sender": "가상 전자몰", "subject": "노트북 할인"},
+            {"app": "Shopping", "sender": "가상 식품몰", "subject": "주말 식품 할인"},
+            {"app": "Store", "sender": "가상 문구점", "subject": "신학기 문구 할인"},
+            {"app": "Shopping", "sender": "가상 리빙몰", "subject": "생활용품 할인"},
+        ),
+        notifications=(
+            NotificationTemplate("{subject} 시작", "{subject} 행사가 시작되었습니다."),
+            NotificationTemplate("{subject} 기간", "행사는 {date}까지 진행됩니다."),
+        ),
+        target_lines=("{subject} 행사가 {date}까지 진행됩니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_maintenance_rescheduled",
+        category="기타",
+        variants=(
+            {"app": "Notice", "sender": "가상 시설팀", "subject": "엘리베이터 점검"},
+            {"app": "Community", "sender": "가상 관리실", "subject": "주차장 점검"},
+            {"app": "Notice", "sender": "가상 전산실", "subject": "네트워크 점검"},
+            {"app": "Community", "sender": "가상 운영센터", "subject": "냉난방 점검"},
+            {"app": "Notice", "sender": "가상 안전팀", "subject": "소방 설비 점검"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 일정 변경 안내입니다."),
+            NotificationTemplate("{sender}", "기존 일정은 {old_date}였어요."),
+            NotificationTemplate("{sender}", "새 일정은 {new_date} {time}입니다."),
+            NotificationTemplate("{sender}", "변경된 시간에 점검을 진행합니다."),
+        ),
+        target_lines=("{subject} 일정이 {new_date} {time}로 변경되었습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="lost_found_notice",
+        category="기타",
+        variants=(
+            {"app": "Community", "sender": "가상 학생지원팀", "subject": "검은색 우산", "place": "학생회관 안내실"},
+            {"app": "Notice", "sender": "가상 도서관", "subject": "무선 이어폰", "place": "도서관 안내 데스크"},
+            {"app": "Community", "sender": "가상 관리실", "subject": "카드 지갑", "place": "본관 관리실"},
+            {"app": "Notice", "sender": "가상 체육관", "subject": "운동 가방", "place": "체육관 접수대"},
+            {"app": "Community", "sender": "가상 행정실", "subject": "학생증", "place": "행정실"},
+        ),
+        notifications=(
+            NotificationTemplate("분실물 발견", "{subject}이 발견되었습니다."),
+            NotificationTemplate("분실물 보관 안내", "발견된 {subject}은 {place}에 보관 중입니다."),
+        ),
+        target_lines=("발견된 {subject}은 {place}에 보관 중입니다.",),
+        max_summary_lines=1,
+    ),
+)
+
+
+COLLOQUIAL_SCENARIOS = (
+    Scenario(
+        name="fragmented_colloquial_incident",
+        category="긴급 업무",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 운영팀장", "subject": "결제 서버", "symptom": "응답이 계속 끊겨", "action": "긴급 복구"},
+            {"app": "Slack", "sender": "가상 백엔드 리더", "subject": "로그인 API", "symptom": "500 오류가 반복돼", "action": "원인 확인"},
+            {"app": "Teams", "sender": "가상 인프라 담당자", "subject": "파일 서버", "symptom": "접속이 안 돼", "action": "장비 전환"},
+            {"app": "Discord", "sender": "가상 배포 담당자", "subject": "주문 서비스", "symptom": "배포 뒤에 장애 났어", "action": "롤백"},
+            {"app": "KakaoTalk", "sender": "가상 SRE 리더", "subject": "검색 API", "symptom": "지연이 너무 길어", "action": "트래픽 우회"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 그거"),
+            NotificationTemplate("{sender}", "아까부터 {symptom}"),
+            NotificationTemplate("{sender}", "지금 {action} 중"),
+            NotificationTemplate("{sender}", "끝나면 다시 말할게"),
+        ),
+        target_lines=("{subject}에서 {symptom_summary} 현재 {action} 중입니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_task",
+        category="일반 업무",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 팀장", "subject": "발표 자료", "artifact": "결론 부분", "place": "공유 폴더"},
+            {"app": "Slack", "sender": "가상 리뷰어", "subject": "코드 리뷰", "artifact": "실패 테스트", "place": "개발 채널"},
+            {"app": "Teams", "sender": "가상 기획자", "subject": "요구사항 문서", "artifact": "변경 내역", "place": "프로젝트 보드"},
+            {"app": "Discord", "sender": "가상 전시 팀장", "subject": "부스 안내문", "artifact": "오탈자", "place": "전시 준비 채널"},
+            {"app": "KakaoTalk", "sender": "가상 조교", "subject": "과제 보고서", "artifact": "참고문헌", "place": "과제 게시판"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "저번에 말한 {subject} 있잖아"),
+            NotificationTemplate("{sender}", "그거 {artifact}만 고쳐서"),
+            NotificationTemplate("{sender}", "{date} {time}까지"),
+            NotificationTemplate("{sender}", "{place}에 다시 올려줘"),
+        ),
+        target_lines=("{subject}에서 {artifact} 관련 내용을 수정해 {date} {time}까지 {place}에 다시 올려야 합니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_schedule",
+        category="일정/회의",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 스터디장", "subject": "AI 스터디", "old_time": "오후 3시", "place": "B강의실"},
+            {"app": "Slack", "sender": "가상 프로젝트 리더", "subject": "중간 점검", "old_time": "오전 10시", "place": "회의실 2"},
+            {"app": "Teams", "sender": "가상 팀장", "subject": "주간 회의", "old_time": "오후 2시", "place": "온라인 회의실"},
+            {"app": "Discord", "sender": "가상 동아리 회장", "subject": "전시 준비 모임", "old_time": "오후 5시", "place": "창의관 402호"},
+            {"app": "KakaoTalk", "sender": "가상 조교", "subject": "과제 질의응답", "old_time": "오전 11시", "place": "공학관 301호"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 있잖아"),
+            NotificationTemplate("{sender}", "원래 {old_time}였는데"),
+            NotificationTemplate("{sender}", "{date} {time}로 바뀜"),
+            NotificationTemplate("{sender}", "장소는 {place} 그대로래"),
+        ),
+        target_lines=("{subject}가 {date} {time}로 변경되었으며 장소는 기존과 동일한 {place}입니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_security",
+        category="시스템/보안",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 보안 담당자", "subject": "업무 계정", "device": "Windows PC", "place": "부산"},
+            {"app": "Slack", "sender": "가상 인증팀", "subject": "개발자 계정", "device": "MacBook", "place": "대전"},
+            {"app": "Teams", "sender": "가상 계정보호팀", "subject": "학교 포털", "device": "Android 기기", "place": "제주"},
+            {"app": "Discord", "sender": "가상 보안 봇", "subject": "관리자 계정", "device": "Linux PC", "place": "광주"},
+            {"app": "KakaoTalk", "sender": "가상 보안센터", "subject": "쇼핑 계정", "device": "iPhone", "place": "인천"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 로그인 알림 뜬 거"),
+            NotificationTemplate("{sender}", "{place}에서 {device}로 들어왔대"),
+            NotificationTemplate("{sender}", "내가 한 거 아니라고 했고"),
+            NotificationTemplate("{sender}", "기기 차단이랑 로그아웃 처리됨"),
+        ),
+        target_lines=("{place}의 {device}에서 발생한 {subject} 로그인을 본인 활동이 아닌 것으로 확인해 기기를 차단하고 로그아웃 처리했습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_appointment",
+        category="개인 중요",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 치과", "subject": "치과 진료", "place": "3층 진료실"},
+            {"app": "KakaoTalk", "sender": "가상 병원", "subject": "건강 검진", "place": "검진센터"},
+            {"app": "Slack", "sender": "가상 상담센터", "subject": "상담 예약", "place": "온라인 상담실"},
+            {"app": "Teams", "sender": "가상 안과", "subject": "안과 진료", "place": "2층 접수처"},
+            {"app": "KakaoTalk", "sender": "가상 검진센터", "subject": "예방 접종", "place": "본관 접종실"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "전에 잡은 {subject} 있죠"),
+            NotificationTemplate("{sender}", "그거 {date} {time}로 변경됐어요"),
+            NotificationTemplate("{sender}", "{place}로 오시면 되고"),
+            NotificationTemplate("{sender}", "시간 맞춰 와주세요"),
+        ),
+        target_lines=("{subject} 예약이 {date} {time}로 변경되었으며 {place}로 방문해야 합니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_delivery",
+        category="개인 일반",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 택배기사", "subject": "생활용품", "place": "현관 앞"},
+            {"app": "KakaoTalk", "sender": "가상 배송기사", "subject": "도서", "place": "무인 보관함"},
+            {"app": "Slack", "sender": "가상 물류팀", "subject": "전자기기", "place": "경비실"},
+            {"app": "Teams", "sender": "가상 판매자", "subject": "의류", "place": "택배 보관실"},
+            {"app": "KakaoTalk", "sender": "가상 배송센터", "subject": "문구류", "place": "관리실"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "{subject} 시킨 거"),
+            NotificationTemplate("{sender}", "방금 도착했고"),
+            NotificationTemplate("{sender}", "{place}에 뒀어요"),
+        ),
+        target_lines=("주문한 {subject}이 {place}에 배송 완료되었습니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_promotion",
+        category="광고/홍보",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 쇼핑몰", "subject": "신규 회원 쿠폰"},
+            {"app": "KakaoTalk", "sender": "가상 카페", "subject": "음료 할인 쿠폰"},
+            {"app": "Slack", "sender": "가상 마켓", "subject": "무료 배송 쿠폰"},
+            {"app": "Teams", "sender": "가상 서점", "subject": "도서 할인 쿠폰"},
+            {"app": "KakaoTalk", "sender": "가상 브랜드몰", "subject": "생일 쿠폰"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "그 {subject} 있잖아요"),
+            NotificationTemplate("{sender}", "아직 안 쓴 거"),
+            NotificationTemplate("{sender}", "{date}까지만 된대요"),
+            NotificationTemplate("{sender}", "지나면 없어짐"),
+        ),
+        target_lines=("사용하지 않은 {subject}은 {date}에 만료됩니다.",),
+        max_summary_lines=1,
+    ),
+    Scenario(
+        name="fragmented_colloquial_notice",
+        category="기타",
+        variants=(
+            {"app": "KakaoTalk", "sender": "가상 행정실", "subject": "검은색 우산", "place": "학생회관 안내실"},
+            {"app": "KakaoTalk", "sender": "가상 도서관", "subject": "무선 이어폰", "place": "도서관 안내 데스크"},
+            {"app": "Slack", "sender": "가상 관리실", "subject": "카드 지갑", "place": "본관 관리실"},
+            {"app": "Teams", "sender": "가상 체육관", "subject": "운동 가방", "place": "체육관 접수대"},
+            {"app": "KakaoTalk", "sender": "가상 학생지원팀", "subject": "학생증", "place": "행정실"},
+        ),
+        notifications=(
+            NotificationTemplate("{sender}", "누가 두고 간 {subject}"),
+            NotificationTemplate("{sender}", "그거 찾은 거 같아요"),
+            NotificationTemplate("{sender}", "지금 {place}에 있고"),
+            NotificationTemplate("{sender}", "거기로 찾으러 오면 됨"),
+        ),
+        target_lines=("발견된 {subject}은 {place}에 보관 중이므로 해당 장소에서 찾아가야 합니다.",),
+        max_summary_lines=1,
+    ),
+)
+
+
+SCENARIOS = BASE_SCENARIOS + ADDITIONAL_SCENARIOS + COLLOQUIAL_SCENARIOS
+
+_SCENARIO_BY_NAME = {scenario.name: scenario for scenario in SCENARIOS}
+
+
+def _conversation_scenario(
+    name: str, source: str, bodies: tuple[str, ...], targets: tuple[str, ...]
+) -> Scenario:
+    """Reuse held-out entities, but teach a different message decomposition."""
+    original = _SCENARIO_BY_NAME[source]
+    variants = original.variants
+    if source == "refund_completed":
+        amounts = ("24,000원", "18,500원", "46,000원", "12,800원", "57,000원")
+        variants = tuple(
+            {**variant, "amount": amount}
+            for variant, amount in zip(variants, amounts, strict=True)
+        )
+    return Scenario(
+        name=name,
+        category=original.category,
+        variants=variants,
+        notifications=tuple(NotificationTemplate("{sender}", body) for body in bodies),
+        target_lines=targets,
+        max_summary_lines=len(targets),
+    )
+
+
+CONVERSATION_REPAIR_SCENARIOS = (
+    _conversation_scenario(
+        "fragmented_subject_task_deliverables", "fragmented_task_chat",
+        ("{subject} 건 이야기예요.", "마감은 {date}예요.", "{time}까지 부탁해요.",
+         "{artifact}도 필요해요.", "그 자료는 {place}에 올려 주세요."),
+        ("{subject} 작업은 {date} {time}까지 완료해야 합니다.",
+         "{artifact}를 {place}에 올려야 합니다."),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_delivery_result", "fragmented_colloquial_delivery",
+        ("주문했던 {subject} 말인데요.", "아까 배송을 마쳤어요.",
+         "수령 위치는 {place}예요.", "거기에서 가져가시면 됩니다."),
+        ("주문한 {subject} 배송이 완료되어 {place}에서 수령할 수 있습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_cancelled", "appointment_cancelled",
+        ("{subject} 예약 관련해서요.", "{date} 예약이고요.", "시간은 {time}였어요.",
+         "기관 사정으로 그 예약은 취소됐습니다."),
+        ("{date} {time} {subject} 예약이 취소되었습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_reset_final_state", "password_reset_completed",
+        ("{subject} 보호 조치예요.", "비밀번호 재설정을 요청했어요.",
+         "방금 재설정이 완료됐어요.", "모든 기기에서 로그아웃도 끝났어요."),
+        ("{subject} 비밀번호 재설정이 완료되어 모든 기기에서 로그아웃되었습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_refund_final_state", "refund_completed",
+        ("{subject} 환불 건이에요.", "지금은 처리 중이에요.",
+         "업데이트할게요. 환불이 완료됐어요.", "{amount}이 결제한 카드로 반환됐습니다."),
+        ("{subject} 환불이 완료되어 {amount}이 결제한 카드로 반환되었습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_notice_retrieval", "fragmented_colloquial_notice",
+        ("분실한 {subject} 관련입니다.", "찾아서 보관하고 있어요.",
+         "보관 장소는 {place}예요.", "여기로 찾으러 오세요."),
+        ("발견된 {subject}은 {place}에 보관 중이며 해당 장소에서 찾아갈 수 있습니다.",),
+    ),
+    _conversation_scenario(
+        "fragmented_subject_schedule_purpose", "fragmented_schedule_chat",
+        ("{subject} 진행할게요.", "참석 대상은 {who}예요.", "{date}에 만나요.",
+         "시작은 {time}예요.", "{place}에서 진행합니다.",
+         "{reason} 때문에 모이는 거예요.", "진행 방식은 {method}입니다."),
+        ("{who} 대상 {subject} 일정은 {date} {time} {place}입니다.",
+         "{reason}을 위해 {method} 방식으로 진행합니다."),
+    ),
+)
+
+TARGETED_SCENARIO_NAMES = (
+    "appointment_cancelled",
+    "fragmented_schedule_chat",
+    "fragmented_task_chat",
+    "password_reset_completed",
+    "fragmented_colloquial_incident",
+    "fragmented_colloquial_task",
+    "fragmented_colloquial_schedule",
+    "fragmented_colloquial_security",
+    "fragmented_colloquial_appointment",
+    "fragmented_colloquial_delivery",
+    "fragmented_colloquial_promotion",
+    "fragmented_colloquial_notice",
+) + tuple(scenario.name for scenario in CONVERSATION_REPAIR_SCENARIOS)
+TARGETED_SCENARIOS = tuple(
+    scenario for scenario in SCENARIOS
+    if scenario.name in TARGETED_SCENARIO_NAMES
+) + CONVERSATION_REPAIR_SCENARIOS
+
+if len(TARGETED_SCENARIOS) != len(TARGETED_SCENARIO_NAMES):
+    raise RuntimeError("a targeted fine-tuning scenario is not configured")
+
+
 def _context_for(split: str, index: int) -> dict[str, str]:
-    month = 10 if split == "train" else 11
-    day = index + 1
-    old_day = day
-    new_day = day + 2
+    start = date(2026, 10, 1) if split == "train" else date(2027, 4, 1)
+    current_date = start + timedelta(days=index)
+    new_date = current_date + timedelta(days=2)
     times = ("오전 9시", "오전 11시", "오후 3시", "오후 6시")
     return {
-        "date": f"{month}월 {day}일",
-        "old_date": f"{month}월 {old_day}일",
-        "new_date": f"{month}월 {new_day}일",
+        "date": f"{current_date.month}월 {current_date.day}일",
+        "old_date": f"{current_date.month}월 {current_date.day}일",
+        "new_date": f"{new_date.month}월 {new_date.day}일",
         "time": times[index % len(times)],
+        "timestamp_date": current_date.isoformat(),
     }
 
 
 def _variant_for(scenario: Scenario, split: str, index: int) -> Mapping[str, str]:
     if split == "validation":
         return scenario.variants[-1]
-    return scenario.variants[index % (len(scenario.variants) - 1)]
+
+    variants = scenario.variants[:-1]
+    variant_count = len(variants)
+    identity = variants[index % variant_count]
+    values = {"app": identity["app"], "sender": identity["sender"]}
+    content_keys = sorted(
+        key for key in variants[0] if key not in {"app", "sender"}
+    )
+    coordinate = index // variant_count
+    for key in content_keys:
+        source = variants[coordinate % variant_count]
+        values[key] = source[key]
+        coordinate //= variant_count
+    return values
 
 
-def _score(values: tuple[int, int, float]) -> dict[str, int | float]:
-    minimum, maximum, average = values
-    return {"min": minimum, "max": maximum, "average": average}
+def _style_index(scenario: Scenario, split: str, index: int) -> int:
+    if split == "validation":
+        return index
+    variant_count = len(scenario.variants) - 1
+    content_field_count = len(
+        {key for key in scenario.variants[0]} - {"app", "sender"}
+    )
+    combination_count = variant_count ** (content_field_count + 1)
+    return index // combination_count
+
+
+def _apply_surface_style(
+    body: str,
+    *,
+    scenario: Scenario,
+    split: str,
+    index: int,
+    step: int,
+    sender: str,
+) -> str:
+    if step != 0:
+        return body
+
+    style_index = _style_index(scenario, split, index)
+    if scenario.name.startswith("fragmented_"):
+        train_prefixes = (
+            "",
+            f"{sender}에서 참고로 알려드려요. ",
+            f"{sender}에서 먼저 말씀드리면, ",
+            f"{sender} 추가 안내예요. ",
+        )
+        validation_prefixes = (
+            "알려드릴게요. ",
+            "확인 부탁해요. ",
+            "먼저 말씀드리면, ",
+            "참고해 주세요. ",
+            "추가 안내예요. ",
+            "이어서 알려드릴게요. ",
+            "변경된 내용을 공유해요. ",
+            "중요한 내용이에요. ",
+            "관련 안내 남길게요. ",
+            "마지막으로 확인해 주세요. ",
+        )
+        prefixes = train_prefixes if split == "train" else validation_prefixes
+        return f"{prefixes[style_index % len(prefixes)]}{body}"
+
+    train_prefixes = (
+        "",
+        f"{sender}에서 전달드립니다. ",
+        f"{sender} 안내입니다. ",
+        f"{sender}에서 확인을 요청했습니다. ",
+    )
+    validation_prefixes = (
+        "새로운 안내입니다. ",
+        f"{sender}에서 알려드립니다. ",
+        "관련 내용을 확인해 주세요. ",
+        f"{sender} 공지입니다. ",
+        "중요 내용을 전달드립니다. ",
+        "추가 정보를 전달드립니다. ",
+        f"{sender}의 변경 안내입니다. ",
+        "다음 내용을 꼭 확인해 주세요. ",
+        "최신 상태를 공유드립니다. ",
+        f"{sender}에서 추가로 안내합니다. ",
+    )
+    prefixes = train_prefixes if split == "train" else validation_prefixes
+    return f"{prefixes[style_index % len(prefixes)]}{body}"
 
 
 def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
@@ -269,16 +919,30 @@ def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
 
     values = dict(_variant_for(scenario, split, index))
     values.update(_context_for(split, index))
-    month = 10 if split == "train" else 11
-    day = index + 1
+    if scenario.name == "fragmented_colloquial_incident":
+        values["symptom_summary"] = {
+            "응답이 계속 끊겨": "응답 끊김이 반복되어",
+            "500 오류가 반복돼": "500 오류가 반복되어",
+            "접속이 안 돼": "접속이 불가능하여",
+            "배포 뒤에 장애 났어": "배포 후 장애가 발생하여",
+            "지연이 너무 길어": "지연이 길어져",
+        }[values["symptom"]]
     notifications = []
     for step, template in enumerate(scenario.notifications):
+        body = template.body.format(**values)
         notifications.append(
             {
                 "id": f"synthetic_{split}_{scenario.name}_{index:03d}_{step + 1}",
-                "timestamp": f"2026-{month:02d}-{day:02d}T09:{step * 10:02d}:00Z",
+                "timestamp": f"{values['timestamp_date']}T08:{step:02d}:00Z",
                 "title": template.title.format(**values),
-                "body": template.body.format(**values),
+                "body": _apply_surface_style(
+                    body,
+                    scenario=scenario,
+                    split=split,
+                    index=index,
+                    step=step,
+                    sender=values["sender"],
+                ),
             }
         )
 
@@ -288,8 +952,6 @@ def build_record(scenario: Scenario, split: str, index: int) -> dict[str, Any]:
             "app_name": values["app"],
             "sender": values["sender"],
             "category": scenario.category,
-            "urgency_score": _score(scenario.urgency),
-            "relevance_score": _score(scenario.relevance),
             "notifications": notifications,
         },
         "max_summary_lines": scenario.max_summary_lines,
@@ -314,6 +976,210 @@ def generate_records(split: str, per_scenario: int) -> list[dict[str, Any]]:
     ]
     validate_records(records, expected_split=split)
     return records
+
+
+def generate_balanced_records(split: str, total_count: int) -> list[dict[str, Any]]:
+    """Build an exact-size dataset balanced across the official categories."""
+
+    if total_count <= 0:
+        raise ValueError("total_count must be positive")
+
+    allocations: list[tuple[Scenario, int]] = []
+    category_base, category_remainder = divmod(total_count, len(FILTER_CATEGORIES))
+    for category_index, category in enumerate(FILTER_CATEGORIES):
+        category_count = category_base + (category_index < category_remainder)
+        category_scenarios = tuple(
+            scenario for scenario in SCENARIOS if scenario.category == category
+        )
+        if not category_scenarios:
+            raise ValueError(f"no scenarios configured for category: {category}")
+
+        scenario_base, scenario_remainder = divmod(
+            category_count, len(category_scenarios)
+        )
+        for scenario_index, scenario in enumerate(category_scenarios):
+            scenario_count = scenario_base + (
+                scenario_index < scenario_remainder
+            )
+            allocations.append((scenario, scenario_count))
+
+    records_by_scenario: list[list[dict[str, Any]]] = []
+    fingerprints: set[str] = set()
+    for scenario, count in allocations:
+        scenario_records: list[dict[str, Any]] = []
+        candidate_index = 0
+        while len(scenario_records) < count:
+            if candidate_index >= 10_000:
+                raise ValueError(
+                    f"could not create {count} diverse records for {scenario.name}"
+                )
+            record = build_record(scenario, split, candidate_index)
+            candidate_index += 1
+            fingerprint = normalized_body_fingerprint(record)
+            if fingerprint in fingerprints:
+                continue
+            fingerprints.add(fingerprint)
+            scenario_records.append(record)
+        records_by_scenario.append(scenario_records)
+
+    records = [
+        scenario_records[record_index]
+        for record_index in range(max(map(len, records_by_scenario)))
+        for scenario_records in records_by_scenario
+        if record_index < len(scenario_records)
+    ]
+
+    validate_records(records, expected_split=split)
+    validate_normalized_diversity(records)
+    return records
+
+
+def generate_targeted_records(
+    split: str,
+    total_count: int,
+    *,
+    existing_records: Sequence[Mapping[str, Any]] = (),
+) -> list[dict[str, Any]]:
+    """Generate held-out variants focused on observed summary failure modes."""
+
+    if total_count < 0:
+        raise ValueError("targeted total_count must not be negative")
+    if total_count == 0:
+        return []
+
+    fingerprints = {
+        normalized_body_fingerprint(record) for record in existing_records
+    }
+    scenario_base, scenario_remainder = divmod(
+        total_count, len(TARGETED_SCENARIOS)
+    )
+    records_by_scenario: list[list[dict[str, Any]]] = []
+    for scenario_index, scenario in enumerate(TARGETED_SCENARIOS):
+        scenario_count = scenario_base + (
+            scenario_index < scenario_remainder
+        )
+        scenario_records: list[dict[str, Any]] = []
+        candidate_index = 0
+        while len(scenario_records) < scenario_count:
+            if candidate_index >= 10_000:
+                raise ValueError(
+                    f"could not create {scenario_count} targeted records "
+                    f"for {scenario.name}"
+                )
+            record = build_record(scenario, split, candidate_index)
+            candidate_index += 1
+            fingerprint = normalized_body_fingerprint(record)
+            if fingerprint in fingerprints:
+                continue
+            fingerprints.add(fingerprint)
+            record["case_id"] = (
+                f"{split}_targeted_{scenario.name}_{candidate_index - 1:03d}"
+            )
+            record["metadata"]["augmentation"] = "failure_targeted"
+            scenario_records.append(record)
+        records_by_scenario.append(scenario_records)
+
+    records = [
+        scenario_records[record_index]
+        for record_index in range(max(map(len, records_by_scenario)))
+        for scenario_records in records_by_scenario
+        if record_index < len(scenario_records)
+    ]
+    validate_records(records, expected_split=split)
+    validate_normalized_diversity(records)
+    return records
+
+
+def _spread_targeted_records(
+    base_records: Sequence[dict[str, Any]],
+    targeted_records: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Distribute targeted examples across the generated JSONL deterministically."""
+
+    if not targeted_records:
+        return list(base_records)
+
+    combined: list[dict[str, Any]] = []
+    targeted_index = 0
+    for base_index, record in enumerate(base_records, start=1):
+        combined.append(record)
+        desired_count = (
+            base_index * len(targeted_records) // len(base_records)
+        )
+        while targeted_index < desired_count:
+            combined.append(targeted_records[targeted_index])
+            targeted_index += 1
+    combined.extend(targeted_records[targeted_index:])
+    return combined
+
+
+def generate_augmented_records(
+    split: str,
+    *,
+    base_count: int,
+    targeted_count: int,
+) -> list[dict[str, Any]]:
+    """Generate the balanced base plus failure-targeted augmentation."""
+
+    base_records = generate_balanced_records(split, base_count)
+    targeted_records = generate_targeted_records(
+        split,
+        targeted_count,
+        existing_records=base_records,
+    )
+    records = _spread_targeted_records(base_records, targeted_records)
+    validate_records(records, expected_split=split)
+    validate_normalized_diversity(records)
+    return records
+
+
+_DATE_PATTERN = re.compile(r"\d{1,2}월\s+\d{1,2}일")
+_TIME_PATTERN = re.compile(r"(?:오전|오후)\s+\d{1,2}시")
+
+
+def _normalize_generated_text(text: str) -> str:
+    text = _DATE_PATTERN.sub("<DATE>", text)
+    return _TIME_PATTERN.sub("<TIME>", text)
+
+
+def normalized_input_fingerprint(record: Mapping[str, Any]) -> str:
+    """Fingerprint visible input while ignoring IDs and date/time substitutions."""
+
+    group = record["input"]
+
+    visible = {
+        "app_name": group["app_name"],
+        "sender": group["sender"],
+        "category": group["category"],
+        "notifications": [
+            {
+                "title": _normalize_generated_text(notification["title"]),
+                "body": _normalize_generated_text(notification["body"]),
+            }
+            for notification in group["notifications"]
+        ],
+    }
+    return json.dumps(visible, ensure_ascii=False, sort_keys=True)
+
+
+def normalized_body_fingerprint(record: Mapping[str, Any]) -> str:
+    group = record["input"]
+    bodies = [
+        _normalize_generated_text(notification["body"])
+        for notification in group["notifications"]
+    ]
+    return json.dumps(bodies, ensure_ascii=False)
+
+
+def validate_normalized_diversity(records: Sequence[Mapping[str, Any]]) -> None:
+    fingerprints: set[str] = set()
+    for record in records:
+        fingerprint = normalized_body_fingerprint(record)
+        if fingerprint in fingerprints:
+            raise ValueError(
+                "dataset contains duplicate message bodies after normalizing dates and times"
+            )
+        fingerprints.add(fingerprint)
 
 
 def training_messages(record: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -357,7 +1223,7 @@ def validate_records(
         if not isinstance(target, Mapping) or not isinstance(max_summary_lines, int):
             raise ValueError(f"{case_id} has an invalid target contract")
         raw_target = json.dumps(target, ensure_ascii=False, separators=(",", ":"))
-        parsed = parse_summary_response(raw_target)
+        parsed = parse_summary_response(raw_target, allow_list_repair=False)
         if len(parsed) > max_summary_lines or max_summary_lines > MAX_SUMMARY_LINES:
             raise ValueError(f"{case_id} exceeds its line limit")
         training_messages(record)
@@ -378,13 +1244,31 @@ def main() -> None:
     parser.add_argument(
         "--validation-path", type=Path, default=DEFAULT_VALIDATION_PATH
     )
-    parser.add_argument("--train-per-scenario", type=int, default=20)
-    parser.add_argument("--validation-per-scenario", type=int, default=4)
+    parser.add_argument("--train-count", type=int, default=1000)
+    parser.add_argument("--validation-count", type=int, default=120)
+    parser.add_argument("--targeted-train-count", type=int, default=200)
+    parser.add_argument("--targeted-validation-count", type=int, default=40)
+    parser.add_argument("--train-per-scenario", type=int)
+    parser.add_argument("--validation-per-scenario", type=int)
     args = parser.parse_args()
 
-    train_records = generate_records("train", args.train_per_scenario)
-    validation_records = generate_records(
-        "validation", args.validation_per_scenario
+    train_records = (
+        generate_records("train", args.train_per_scenario)
+        if args.train_per_scenario is not None
+        else generate_augmented_records(
+            "train",
+            base_count=args.train_count,
+            targeted_count=args.targeted_train_count,
+        )
+    )
+    validation_records = (
+        generate_records("validation", args.validation_per_scenario)
+        if args.validation_per_scenario is not None
+        else generate_augmented_records(
+            "validation",
+            base_count=args.validation_count,
+            targeted_count=args.targeted_validation_count,
+        )
     )
     write_jsonl(args.train_path, train_records)
     write_jsonl(args.validation_path, validation_records)

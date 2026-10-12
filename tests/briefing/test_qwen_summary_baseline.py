@@ -12,8 +12,12 @@ from briefing_training.prompts import (
     SummaryResponseError,
     build_messages,
     parse_summary_response,
+    parse_summary_response_with_metadata,
 )
-from briefing_training.smoke_test_model import attach_adapter
+from briefing_training.smoke_test_model import (
+    attach_adapter, generation_options, render_generation_prompt,
+)
+from briefing_training.train_lora import render_prompt_completion
 
 
 SYNTHETIC_GROUP = {
@@ -34,6 +38,52 @@ SYNTHETIC_GROUP = {
 
 
 class QwenSummaryBaselineTests(unittest.TestCase):
+    def test_training_style_matches_training_renderer_without_reference_in_prompt(self) -> None:
+        class FakeTokenizer:
+            eos_token = "<eos>"
+
+            @staticmethod
+            def apply_chat_template(messages, **kwargs):
+                import json
+                return json.dumps([messages, kwargs], ensure_ascii=False)
+
+        record = {
+            "input": SYNTHETIC_GROUP, "max_summary_lines": 1,
+            "target": {"summary_lines": ["REFERENCE_MUST_NOT_LEAK"]},
+        }
+        rendered = render_generation_prompt(
+            FakeTokenizer(), SYNTHETIC_GROUP, max_summary_lines=1, prompt_style="training",
+        )
+        self.assertEqual(rendered, render_prompt_completion(record, FakeTokenizer())["prompt"])
+        self.assertNotIn("REFERENCE_MUST_NOT_LEAK", rendered)
+        self.assertIn("/no_think", rendered)
+
+    def test_runtime_style_keeps_explicit_nonthinking_template(self) -> None:
+        class FakeTokenizer:
+            @staticmethod
+            def apply_chat_template(messages, **kwargs):
+                self.assertIs(kwargs["enable_thinking"], False)
+                self.assertNotIn("/no_think", messages[-1]["content"])
+                return "runtime-prompt"
+
+        self.assertEqual(render_generation_prompt(FakeTokenizer(), SYNTHETIC_GROUP), "runtime-prompt")
+        with self.assertRaisesRegex(ValueError, "prompt_style"):
+            render_generation_prompt(FakeTokenizer(), SYNTHETIC_GROUP, prompt_style="invalid")
+
+    def test_greedy_generation_disables_sampling_defaults(self) -> None:
+        options = generation_options(do_sample=False)
+        self.assertFalse(options["do_sample"])
+        self.assertEqual(options["num_beams"], 1)
+        for key in ("temperature", "top_p", "top_k"):
+            self.assertIsNone(options[key])
+
+    def test_sampling_generation_keeps_previous_settings(self) -> None:
+        options = generation_options(do_sample=True)
+        self.assertTrue(options["do_sample"])
+        self.assertEqual(options["temperature"], 0.7)
+        self.assertEqual(options["top_p"], 0.8)
+        self.assertEqual(options["top_k"], 20)
+
     def test_adapter_is_loaded_from_the_requested_path(self) -> None:
         base_model = object()
         adapted_model = object()
@@ -74,6 +124,8 @@ class QwenSummaryBaselineTests(unittest.TestCase):
         self.assertIn("반드시 { 문자로 시작", actual_prompt)
         self.assertIn("마지막 항목이 가장 최신", actual_prompt)
         self.assertIn("서로 다른 정보를 보태면", actual_prompt)
+        self.assertIn("연속된 짧은 메시지", actual_prompt)
+        self.assertIn("누가, 언제, 어디서, 무엇을, 왜, 어떻게", actual_prompt)
 
     def test_parser_accepts_one_to_three_summary_lines(self) -> None:
         parsed = parse_summary_response(
@@ -91,6 +143,24 @@ class QwenSummaryBaselineTests(unittest.TestCase):
         )
 
         self.assertEqual(parsed, ("가상 알림 요약",))
+
+    def test_parser_safely_repairs_bare_summary_array(self) -> None:
+        parsed = parse_summary_response_with_metadata(
+            '["Windows 기기를 차단했습니다.","활성 세션을 로그아웃했습니다."]'
+        )
+
+        self.assertEqual(
+            parsed.summary_lines,
+            ("Windows 기기를 차단했습니다.", "활성 세션을 로그아웃했습니다."),
+        )
+        self.assertTrue(parsed.format_repaired)
+
+    def test_parser_can_require_the_strict_object_contract(self) -> None:
+        with self.assertRaisesRegex(SummaryResponseError, "only"):
+            parse_summary_response(
+                '["요약"]',
+                allow_list_repair=False,
+            )
 
     def test_parser_rejects_thinking_or_explanatory_text(self) -> None:
         with self.assertRaises(SummaryResponseError):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
-from .categorization import categorize_group
+from .categorization import categorize_group, categorize_text
 from .schema import BriefingItem, CategoryDecision, RawNotification
 
 
@@ -31,10 +31,17 @@ class CategoryProvider(Protocol):
 
 
 class RuleBasedCategoryProvider:
-    """Choose a group category after related notifications are assembled."""
+    """Legacy, explicit compatibility with filtering-owned categories."""
 
     def categorize(self, items: Sequence[BriefingItem]) -> CategoryDecision:
         return categorize_group(list(items))
+
+
+class TextCategoryProvider:
+    """Offline source-text fallback for briefing-owned classification."""
+
+    def categorize(self, items: Sequence[BriefingItem]) -> CategoryDecision:
+        return categorize_text(list(items))
 
 
 class RuleBasedBriefingProvider:
@@ -45,15 +52,8 @@ class RuleBasedBriefingProvider:
             return ()
 
         ordered = sorted(items, key=lambda item: item.notification.timestamp)
-        most_important = max(
-            ordered,
-            key=lambda item: (
-                item.filter_result.urgency_score,
-                item.filter_result.relevance_score,
-                item.notification.timestamp,
-            ),
-        )
-        selected = (ordered[0], most_important, ordered[-1])
+        # Preserve context and the latest updates without filtering scores.
+        selected = (ordered[0], *ordered[-2:])
 
         lines: list[str] = []
         selected_ids: set[str] = set()

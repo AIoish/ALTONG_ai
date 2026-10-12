@@ -1,33 +1,38 @@
 from collections import Counter
+from datetime import datetime
 import unittest
 
 from briefing_training.evaluate import (
     _render_review_markdown,
     validate_evaluation_cases,
 )
+from briefing_training.prepare_dataset import (
+    generate_augmented_records,
+    generate_records,
+)
 from briefing_training.smoke_test_model import load_cases
 from src.briefing.schema import FILTER_CATEGORIES
 
 
 EXPECTED_CATEGORY_COUNTS = {
-    "긴급 업무": 3,
-    "일반 업무": 3,
-    "일정/회의": 3,
-    "시스템/보안": 3,
-    "개인 중요": 2,
-    "개인 일반": 2,
-    "광고/홍보": 2,
-    "기타": 2,
+    "긴급 업무": 4,
+    "일반 업무": 5,
+    "일정/회의": 5,
+    "시스템/보안": 4,
+    "개인 중요": 3,
+    "개인 일반": 3,
+    "광고/홍보": 3,
+    "기타": 3,
 }
 
 
 class EvaluationDatasetTests(unittest.TestCase):
-    def test_default_evaluation_set_has_twenty_reviewed_cases(self) -> None:
+    def test_default_evaluation_set_has_thirty_reviewed_cases(self) -> None:
         cases = load_cases()
 
         validate_evaluation_cases(cases)
 
-        self.assertEqual(len(cases), 20)
+        self.assertEqual(len(cases), 30)
         self.assertEqual(
             Counter(case["input"]["category"] for case in cases),
             EXPECTED_CATEGORY_COUNTS,
@@ -49,11 +54,105 @@ class EvaluationDatasetTests(unittest.TestCase):
                 case["max_summary_lines"],
             )
 
+    def test_fragmented_chat_cases_have_close_sequential_notifications(self) -> None:
+        cases = {
+            case["case_id"]: case
+            for case in load_cases()
+            if case["case_id"].startswith("fragmented_")
+        }
+
+        self.assertEqual(
+            set(cases),
+            {"fragmented_schedule_chat", "fragmented_task_chat"},
+        )
+        for case in cases.values():
+            group = case["input"]
+            notifications = group["notifications"]
+
+            self.assertGreaterEqual(len(notifications), 4)
+            self.assertTrue(group["app_name"])
+            self.assertTrue(group["sender"])
+            self.assertEqual(
+                len({notification["title"] for notification in notifications}),
+                1,
+            )
+            sequence_numbers = [
+                int(notification["id"].rsplit("_", 1)[-1])
+                for notification in notifications
+            ]
+            self.assertEqual(
+                sequence_numbers,
+                list(range(sequence_numbers[0], sequence_numbers[0] + len(notifications))),
+            )
+
+            timestamps = [
+                datetime.fromisoformat(notification["timestamp"].replace("Z", "+00:00"))
+                for notification in notifications
+            ]
+            self.assertTrue(
+                all(
+                    (later - earlier).total_seconds() == 60
+                    for earlier, later in zip(timestamps, timestamps[1:])
+                )
+            )
+
+    def test_fragmented_evaluation_messages_are_held_out_from_training(self) -> None:
+        train_bodies = {
+            notification["body"]
+            for record in generate_records("train", 20)
+            for notification in record["input"]["notifications"]
+        }
+        evaluation_bodies = {
+            notification["body"]
+            for case in load_cases()
+            if case["case_id"].startswith("fragmented_")
+            for notification in case["input"]["notifications"]
+        }
+
+        self.assertTrue(train_bodies.isdisjoint(evaluation_bodies))
+
+    def test_colloquial_cases_cover_all_categories_and_are_held_out(self) -> None:
+        cases = [
+            case for case in load_cases()
+            if case["case_id"].startswith("colloquial_")
+        ]
+        self.assertEqual(len(cases), 8)
+        self.assertEqual(
+            {case["input"]["category"] for case in cases},
+            set(FILTER_CATEGORIES),
+        )
+
+        train_bodies = {
+            notification["body"]
+            for record in generate_augmented_records(
+                "train",
+                base_count=1000,
+                targeted_count=200,
+            )
+            for notification in record["input"]["notifications"]
+        }
+        evaluation_bodies = {
+            notification["body"]
+            for case in cases
+            for notification in case["input"]["notifications"]
+        }
+        self.assertTrue(train_bodies.isdisjoint(evaluation_bodies))
+
+        for case in cases:
+            notifications = case["input"]["notifications"]
+            self.assertGreaterEqual(len(notifications), 3)
+            self.assertEqual(
+                {notification["title"] for notification in notifications},
+                {case["input"]["sender"]},
+            )
+
     def test_review_report_shows_source_reference_and_model_output(self) -> None:
         report = {
             "model": "Qwen/Qwen3-0.6B",
             "case_count": 1,
             "structured_output_rate": 1.0,
+            "raw_contract_compliance_rate": 0.0,
+            "format_repair_rate": 1.0,
             "case_pass_rate": 1.0,
             "fact_coverage": 1.0,
             "results": [
@@ -65,6 +164,7 @@ class EvaluationDatasetTests(unittest.TestCase):
                     "fact_total": 1,
                     "missing_expected_facts": [],
                     "line_limit_passed": True,
+                    "format_repaired": True,
                     "forbidden_phrase_hits": [],
                     "notifications": [
                         {
@@ -87,6 +187,8 @@ class EvaluationDatasetTests(unittest.TestCase):
         self.assertIn("### 사람 기준 요약", rendered)
         self.assertIn("### 모델 요약", rendered)
         self.assertIn("B강의실", rendered)
+        self.assertIn("원본 JSON 계약 준수율: 0.0", rendered)
+        self.assertIn("출력 형식 자동 보정: True", rendered)
 
 
 if __name__ == "__main__":
