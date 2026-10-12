@@ -29,8 +29,12 @@ def load_json_array(path: str | Path) -> list[dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--adapter-path", type=Path)
+    parser.add_argument("--gguf-path", type=Path, help="diagnostic local llama-server model")
+    parser.add_argument("--tokenizer-path", type=Path)
+    parser.add_argument("--server-url", default="http://127.0.0.1:18089")
     parser.add_argument("--rule-based", action="store_true", help="offline structure test; does not assess model quality")
     parser.add_argument("--contract", choices=("briefing", "summary"), default="briefing")
+    parser.add_argument("--no-category-correction", action="store_true")
     parser.add_argument("--output", type=Path, help="dashboard session_id + groups JSON")
     parser.add_argument("--report-output", type=Path, help="category-organized Markdown report")
     parser.add_argument("--category-output", type=Path, help="optional category-organized JSON projection")
@@ -47,10 +51,19 @@ def main() -> None:
     parser.add_argument("--session-id", default="runtime_qwen_smoke")
     args = parser.parse_args()
 
-    if not args.rule_based and args.adapter_path is None:
-        parser.error("provide --adapter-path or --rule-based")
+    if sum((args.rule_based, args.adapter_path is not None, args.gguf_path is not None)) != 1:
+        parser.error("provide exactly one of --adapter-path, --gguf-path, or --rule-based")
+    backend = None
+    if args.gguf_path is not None:
+        if args.tokenizer_path is None or args.contract != "briefing":
+            parser.error("GGUF pipeline validation requires --tokenizer-path and --contract briefing")
+        from .evaluate_gguf import GGUFQwenBackend
+        backend = GGUFQwenBackend(gguf_path=args.gguf_path, tokenizer_path=args.tokenizer_path,
+                                  server_url=args.server_url)
     provider = None if args.rule_based else QwenBriefingProvider(
         adapter_path=args.adapter_path, allow_fallback=False, contract=args.contract,
+        category_correction=not args.no_category_correction,
+        backend=backend,
     )
     service = SessionBriefingService(provider=provider)
     briefing = service.build(

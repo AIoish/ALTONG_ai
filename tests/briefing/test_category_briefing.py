@@ -294,6 +294,16 @@ class CategoryBriefingTests(unittest.TestCase):
         self.assertIn("방 이름을 장소", prompt)
         self.assertIn("timestamp는 수신 시각", prompt)
 
+    def test_model_misclassification_cannot_create_document_schedule(self):
+        provider = QwenBriefingProvider(backend=FakeBackend("일정/회의"), allow_fallback=False)
+        for body in ("행사 안내문 검토해서 올려 주세요.", "발표 자료 업로드 완료했습니다."):
+            report = build([notification("a", body=body)], provider=provider)
+            self.assertEqual(report.groups[0].schedule_summaries, ())
+
+    def test_document_review_with_explicit_deadline_keeps_schedule(self):
+        report = build([notification("a", body="행사 안내문을 내일 오후 2시까지 검토해 주세요.")])
+        self.assertEqual(len(report.groups[0].schedule_summaries), 1)
+
     def test_old_checkpoint_cannot_resume_new_task_before_model_load(self):
         with patch("sys.argv", ["train_lora", "--task", "briefing", "--resume-from-checkpoint", "old-v6-checkpoint"]), \
              patch.object(train_lora, "train") as training, redirect_stdout(io.StringIO()), \
@@ -307,7 +317,7 @@ class CategoryBriefingTests(unittest.TestCase):
         wrong = json.dumps({"primary_category": "기타", "summary_lines": case["reference_summary_lines"]}, ensure_ascii=False)
         for raw, accuracy in ((correct, 1.0), (wrong, 0.0)):
             output = io.StringIO()
-            with patch("sys.argv", ["evaluate", "--task", "briefing", "--greedy"]), \
+            with patch("sys.argv", ["evaluate", "--task", "briefing", "--greedy", "--no-category-correction"]), \
                  patch.object(evaluate, "load_cases", return_value=[case]), \
                  patch.object(evaluate, "load_model", return_value=(None, None)), \
                  patch.object(evaluate, "generate_summary", return_value=(raw, 0.1)), \

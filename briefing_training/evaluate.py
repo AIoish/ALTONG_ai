@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from src.briefing.schema import FILTER_CATEGORIES
 from src.briefing.category_prompt import parse_response
+from src.briefing.category_correction import RULE_VERSION, correct_category
 from .prepare_category_dataset import EVALUATION_PATH
 
 from .prompts import MODEL_NAME, parse_summary_response_with_metadata
@@ -111,6 +113,8 @@ def validate_evaluation_cases(cases: Sequence[Mapping[str, Any]]) -> None:
         _expected_facts(case)
         forbidden_phrases = _forbidden_phrases(case)
         _max_summary_lines(case)
+        if not isinstance(case.get("require_korean", False), bool):
+            raise ValueError("require_korean must be boolean")
         reference_lines = _reference_summary_lines(case)
         reference_text = " ".join(reference_lines)
         if any(
@@ -137,6 +141,8 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
         f"- 안전 형식 보정률: {report['format_repair_rate']}",
         f"- 사례 통과율: {report['case_pass_rate']}",
         f"- 카테고리 정확도: {report.get('category_accuracy', '분류 미평가')}",
+        f"- 원본 모델 카테고리 정확도: {report.get('raw_category_accuracy', '분류 미평가')}",
+        f"- 카테고리 교정 적용: {report.get('category_correction_enabled', False)}",
         f"- 사실 정보 포함률: {report['fact_coverage']}",
         "",
         "아래 데이터는 모두 합성 사례입니다. 자동 점수만 보지 말고 입력 알림, "
@@ -152,8 +158,11 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
                 "",
                 f"- 카테고리: {result['category']}",
                 f"- 예측 카테고리: {result.get('predicted_category') or '분류 미평가'}",
+                f"- 원본 모델 카테고리: {result.get('model_predicted_category') or '분류 미평가'}",
+                f"- 교정 규칙: {result.get('category_correction_rules') or '없음'}",
                 f"- 핵심 사실: {result['fact_hits']}/{result['fact_total']}",
                 f"- 줄 수 제한 통과: {result['line_limit_passed']}",
+                f"- 한국어 포함 검사(요구한 사례만): {result.get('language_passed', True)}",
                 f"- 출력 형식 자동 보정: {result['format_repaired']}",
                 f"- 누락된 핵심 사실: "
                 f"{result['missing_expected_facts'] or '없음'}",
@@ -182,10 +191,12 @@ def _render_review_markdown(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
+def main(*, model_loader=None, summary_generator=None, runtime_metadata=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=Path)
     parser.add_argument("--task", choices=("briefing", "summary"), default="summary")
+    parser.add_argument("--no-category-correction", action="store_true",
+                        help="evaluate raw model categories without runtime postprocessing")
     parser.add_argument(
         "--prompt-style", choices=("runtime", "training"), default="runtime",
         help="compare current runtime formatting with the exact training prompt formatting",
@@ -214,7 +225,7 @@ def main() -> None:
 
     cases = load_cases(args.cases)
     validate_evaluation_cases(cases)
-    tokenizer, model = load_model(adapter_path=args.adapter_path)
+    tokenizer, model = (model_loader or load_model)(adapter_path=args.adapter_path)
     structured_count = 0
     raw_contract_count = 0
     format_repair_count = 0
@@ -222,6 +233,9 @@ def main() -> None:
     fact_total = 0
     passed_case_count = 0
     category_hits = 0
+    raw_category_hits = 0
+    raw_passed_case_count = 0
+    correction_count = 0
     latencies: list[float] = []
     results: list[dict[str, Any]] = []
 
@@ -232,7 +246,7 @@ def main() -> None:
 
         max_summary_lines = _max_summary_lines(case)
         reference_summary_lines = _reference_summary_lines(case)
-        raw_response, elapsed_seconds = generate_summary(
+        raw_response, elapsed_seconds = (summary_generator or generate_summary)(
             tokenizer=tokenizer,
             model=model,
             group=group,
@@ -249,12 +263,20 @@ def main() -> None:
 
         try:
             predicted_category = None
+            model_predicted_category = None
+            correction = None
             expected_category = case.get("expected_category", group.get("category"))
             category_passed = True
             if args.task == "briefing":
                 decision = parse_response(raw_response)
                 summary_lines = decision.summary_lines
                 predicted_category = decision.primary_category
+                model_predicted_category = predicted_category
+                raw_category_hits += int(predicted_category == expected_category)
+                if not args.no_category_correction:
+                    correction = correct_category(group, predicted_category)
+                    predicted_category = correction.category
+                    correction_count += int(correction.changed)
                 category_passed = predicted_category == expected_category
                 category_hits += int(category_passed)
                 format_repaired = False
@@ -298,21 +320,35 @@ def main() -> None:
             error = str(exc)
             format_repaired = False
 
+        language_passed = (
+            not case.get("require_korean", False)
+            or bool(re.search(r"[가-힣]", " ".join(summary_lines)))
+        )
         passed = (
             error is None
             and hits == len(expected_facts)
             and not forbidden_hits
             and line_limit_passed
             and category_passed
+            and language_passed
         )
         if passed:
             passed_case_count += 1
+        raw_passed = (error is None and hits == len(expected_facts) and not forbidden_hits
+                      and line_limit_passed and language_passed
+                      and (args.task != "briefing" or model_predicted_category == expected_category))
+        raw_passed_case_count += int(raw_passed)
 
         results.append(
             {
                 "case_id": case.get("case_id", index),
                 "category": case.get("expected_category", group.get("category")),
                 "predicted_category": predicted_category,
+                "model_predicted_category": model_predicted_category,
+                "category_correction_applied": correction.changed if correction else False,
+                "category_correction_rules": list(correction.matched_rule_ids) if correction else [],
+                "category_correction_conflict": correction.conflicting if correction else False,
+                "raw_passed": raw_passed,
                 "category_passed": category_passed if args.task == "briefing" else None,
                 "passed": passed,
                 "structured_output": error is None,
@@ -325,6 +361,7 @@ def main() -> None:
                 "max_summary_lines": max_summary_lines,
                 "expected_max_summary_lines": _expected_max_summary_lines(case),
                 "line_limit_passed": line_limit_passed,
+                "language_passed": language_passed,
                 "latency_seconds": round(elapsed_seconds, 2),
                 "summary_lines": list(summary_lines),
                 "reference_summary_lines": list(reference_summary_lines),
@@ -344,6 +381,11 @@ def main() -> None:
     report = {
         "task": args.task,
         "category_accuracy": round(category_hits / len(cases), 4) if args.task == "briefing" else None,
+        "raw_category_accuracy": round(raw_category_hits / len(cases), 4) if args.task == "briefing" else None,
+        "category_correction_enabled": args.task == "briefing" and not args.no_category_correction,
+        "category_correction_version": RULE_VERSION if args.task == "briefing" and not args.no_category_correction else None,
+        "category_correction_count": correction_count,
+        "raw_case_pass_rate": round(raw_passed_case_count / len(cases), 4),
         "generation_mode": "greedy" if args.greedy else "sampling",
         "prompt_style": args.prompt_style,
         "model": MODEL_NAME,
@@ -363,6 +405,8 @@ def main() -> None:
         "average_latency_seconds": round(sum(latencies) / len(latencies), 2),
         "results": results,
     }
+    if runtime_metadata:
+        report["runtime_metadata"] = runtime_metadata
     serialized_report = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

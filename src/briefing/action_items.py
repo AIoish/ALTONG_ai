@@ -454,6 +454,13 @@ class RuleBasedActionItemProvider:
         # Uploading presentation material or reviewing an event notice is not
         # itself an appointment. Weak action nouns need a parsed date/time.
         strong_cues = set(cues) - {"발표", "행사", "제출"}
+        # A model category alone must not turn document review/upload into an
+        # appointment. Keep genuinely undated schedules, e.g. '회의 장소는...'.
+        document_action = bool(re.search(r"안내문|자료|문서|보고서|초안|문안|포스터", combined_text)) and bool(
+            re.search(r"검토|교정|수정|업로드|올려|올리|작성", combined_text)
+        )
+        if document_action and not strong_cues and temporal is None:
+            return ScheduleExtraction()
         is_schedule = bool(strong_cues or (cues and temporal)) or any(
             item.filter_result.category == "일정/회의" for item in ordered
         )

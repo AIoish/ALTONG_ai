@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
 from .categorization import categorize_group, categorize_text
+from .category_correction import correct_category
 from .category_prompt import MAX_NEW_TOKENS, build_messages as build_briefing_messages, parse_response
 from .qwen_prompt import (
     MAX_SUMMARY_LINES,
@@ -169,10 +170,12 @@ class QwenBriefingProvider:
         max_summary_lines: int = MAX_SUMMARY_LINES,
         allow_fallback: bool = True,
         contract: str = "briefing",
+        category_correction: bool = True,
     ) -> None:
         if contract not in {"briefing", "summary"}:
             raise ValueError("contract must be briefing or summary")
         self._contract = contract
+        self._category_correction = category_correction
         self._backend = backend or TransformersQwenBackend(
             model_name=model_name,
             adapter_path=adapter_path,
@@ -192,12 +195,19 @@ class QwenBriefingProvider:
             raise ValueError("cannot brief an empty group")
         if not self._disabled:
             try:
+                context = build_briefing_context(items)
                 raw = self._backend.generate(build_briefing_messages(
-                    build_briefing_context(items), max_summary_lines=self._max_summary_lines,
+                    context, max_summary_lines=self._max_summary_lines,
                 ))
                 decision = parse_response(raw)
                 if len(decision.summary_lines) > self._max_summary_lines:
                     raise ValueError("model exceeded the requested summary line limit")
+                if self._category_correction:
+                    correction = correct_category(context, decision.primary_category)
+                    if correction.changed:
+                        LOGGER.info("Category corrected: %s -> %s (%s)",
+                                    correction.model_category, correction.category, correction.matched_rule_ids)
+                    decision = BriefingDecision(correction.category, decision.summary_lines)
                 return decision
             except Exception:
                 if not self._allow_fallback:
