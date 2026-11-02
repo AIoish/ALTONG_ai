@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 
@@ -19,7 +20,7 @@ SYSTEM_PROMPT = """당신은 PC 집중 세션이 끝난 뒤 차단된 알림을 
 4. 변경, 취소, 복구, 완료처럼 상태가 달라졌다면 마지막 알림의 상태를 우선하세요.
    이미 취소되거나 바뀐 이전 일정과 상태는 최종 요약에서 제외하세요.
 5. 뒤 알림이 앞 알림을 취소하거나 변경한 것이 아니라 새로운 정보를 보탠 경우에는 두 알림의 핵심 사실을 모두 보존하세요.
-6. 긴급도와 연관도가 높은 내용을 먼저 쓰세요.
+6. 사용자가 알아야 할 핵심 사실과 최신 상태를 우선해서 쓰세요.
 7. 제목만 나열하지 말고 본문에 있는 핵심 사실을 포함하세요.
 8. 일정과 제출 알림은 날짜, 시간, 제출물 등 사용자가 행동하는 데 필요한 정보를 보존하세요.
 9. 각 줄은 알림 표시나 필드 이름 없이 그 자체로 이해되는 완전한 문장이어야 합니다.
@@ -27,6 +28,8 @@ SYSTEM_PROMPT = """당신은 PC 집중 세션이 끝난 뒤 차단된 알림을 
 11. 마크다운, 설명, 사고 과정 없이 아래 JSON 객체 하나만 출력하세요.
 12. 최상위 값은 배열이 아니라 반드시 summary_lines 필드가 있는 객체여야 합니다.
 13. 상태가 이어지는 알림은 제목과 상태를 따로 나열하지 말고 최신 상태가 담긴 완전한 문장으로 합치세요.
+14. 같은 발신자가 가까운 시간에 보낸 짧은 메시지들은 하나의 대화로 읽고, 서로 다른 메시지에 흩어진 핵심 사실을 합쳐서 요약하세요.
+15. 일정·회의 알림은 원문에 있는 경우 누가, 언제, 어디서, 무엇을, 왜, 어떻게를 빠뜨리지 마세요. 원문에 없는 항목은 추측하지 마세요.
 
 출력 스키마:
 {"summary_lines":["첫 번째 요약", "두 번째 요약"]}
@@ -43,20 +46,19 @@ class SummaryResponseError(ValueError):
     """Raised when a model response violates the summary JSON contract."""
 
 
+@dataclass(frozen=True)
+class ParsedSummaryResponse:
+    """Validated summary lines plus whether a safe format repair was needed."""
+
+    summary_lines: tuple[str, ...]
+    format_repaired: bool
+
+
 def _required_text(data: Mapping[str, Any], field: str) -> str:
     value = data.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
-
-
-def _score_text(value: object) -> str:
-    if isinstance(value, Mapping):
-        minimum = value.get("min")
-        maximum = value.get("max")
-        average = value.get("average")
-        return f"min={minimum}, max={maximum}, average={average}"
-    return str(value)
 
 
 def _validate_max_summary_lines(max_summary_lines: int) -> int:
@@ -84,6 +86,8 @@ def _build_user_prompt(
             "notifications_oldest_to_newest의 마지막 항목이 가장 최신 알림입니다.",
             "최신 알림이 취소, 변경, 복구, 완료를 알리면 이전 상태를 버리고 최종 상태만 쓰세요.",
             "알림끼리 상충하지 않고 서로 다른 정보를 보태면 날짜, 시간, 위치, 제출물, 필요한 행동을 빠뜨리지 마세요.",
+            "같은 발신자의 연속된 짧은 메시지는 하나의 대화로 이해하고 각 메시지의 핵심 사실을 합치세요.",
+            "일정·회의는 원문에 제공된 누가, 언제, 어디서, 무엇을, 왜, 어떻게 정보를 모두 보존하세요.",
             "같은 사건의 제목과 상태를 별도 줄로 나열하지 말고 완전한 문장으로 합치세요.",
             "입력의 id, 필드 이름, '알림 1' 같은 표시는 출력하지 마세요.",
             f"summary_lines 배열에는 최대 {max_summary_lines}개의 문장만 넣으세요.",
@@ -125,8 +129,6 @@ def build_messages(
         "app_name": _required_text(group, "app_name"),
         "sender": _required_text(group, "sender"),
         "category": _required_text(group, "category"),
-        "urgency_score": _score_text(group.get("urgency_score")),
-        "relevance_score": _score_text(group.get("relevance_score")),
         "notifications_oldest_to_newest": notification_records,
     }
     user_prompt = _build_user_prompt(group_context, max_summary_lines)
@@ -136,8 +138,12 @@ def build_messages(
     ]
 
 
-def parse_summary_response(raw_response: str) -> tuple[str, ...]:
-    """Parse and strictly validate the JSON returned by the model."""
+def parse_summary_response_with_metadata(
+    raw_response: str,
+    *,
+    allow_list_repair: bool = True,
+) -> ParsedSummaryResponse:
+    """Parse a response and optionally repair a bare top-level string array."""
 
     if not isinstance(raw_response, str) or not raw_response.strip():
         raise SummaryResponseError("model response must be a non-empty string")
@@ -154,12 +160,17 @@ def parse_summary_response(raw_response: str) -> tuple[str, ...]:
     except json.JSONDecodeError as exc:
         raise SummaryResponseError("model response is not valid JSON") from exc
 
-    if not isinstance(payload, dict) or set(payload) != {"summary_lines"}:
+    format_repaired = False
+    if isinstance(payload, list) and allow_list_repair:
+        summary_lines = payload
+        format_repaired = True
+    elif isinstance(payload, dict) and set(payload) == {"summary_lines"}:
+        summary_lines = payload["summary_lines"]
+    else:
         raise SummaryResponseError(
             "model response must contain only the summary_lines field"
         )
 
-    summary_lines = payload["summary_lines"]
     if not isinstance(summary_lines, list):
         raise SummaryResponseError("summary_lines must be an array")
     if not 1 <= len(summary_lines) <= MAX_SUMMARY_LINES:
@@ -175,4 +186,17 @@ def parse_summary_response(raw_response: str) -> tuple[str, ...]:
                 f"each summary line must be at most {MAX_LINE_LENGTH} characters"
             )
         normalized.append(text)
-    return tuple(normalized)
+    return ParsedSummaryResponse(tuple(normalized), format_repaired)
+
+
+def parse_summary_response(
+    raw_response: str,
+    *,
+    allow_list_repair: bool = True,
+) -> tuple[str, ...]:
+    """Return validated summary lines, repairing a safe bare-array variant."""
+
+    return parse_summary_response_with_metadata(
+        raw_response,
+        allow_list_repair=allow_list_repair,
+    ).summary_lines

@@ -18,6 +18,8 @@ from .prompts import (
 
 DEFAULT_CASES_PATH = Path(__file__).with_name("data") / "evaluation_cases.jsonl"
 
+from src.briefing.category_prompt import MAX_NEW_TOKENS, build_messages as build_briefing_messages, parse_response
+
 
 def load_cases(path: str | Path = DEFAULT_CASES_PATH) -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
@@ -66,6 +68,46 @@ def load_model(
     return tokenizer, model
 
 
+def generation_options(*, do_sample: bool, task: str = "summary") -> dict[str, Any]:
+    """Explicitly override sampling defaults stored in the base model config."""
+    return {
+        "max_new_tokens": MAX_NEW_TOKENS if task == "briefing" else 160,
+        "do_sample": do_sample,
+        "num_beams": 1,
+        "temperature": 0.7 if do_sample else None,
+        "top_p": 0.8 if do_sample else None,
+        "top_k": 20 if do_sample else None,
+    }
+
+
+def render_generation_prompt(
+    tokenizer: Any, group: Mapping[str, Any], *,
+    max_summary_lines: int = MAX_SUMMARY_LINES, prompt_style: str = "runtime",
+    task: str = "summary",
+) -> str:
+    if task not in {"briefing", "summary"}:
+        raise ValueError("task must be briefing or summary")
+    builder = build_briefing_messages if task == "briefing" else build_messages
+    messages = builder(group, max_summary_lines=max_summary_lines)
+    if task == "briefing":
+        if prompt_style not in {"runtime", "training"}:
+            raise ValueError("prompt_style must be runtime or training")
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False,
+        )
+    if prompt_style == "training":
+        messages[-1]["content"] += "\n/no_think"
+        # Match train_lora.render_prompt_completion, including its template defaults.
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+    if prompt_style != "runtime":
+        raise ValueError("prompt_style must be runtime or training")
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True, enable_thinking=False,
+    )
+
+
 def generate_summary(
     *,
     tokenizer: Any,
@@ -73,6 +115,9 @@ def generate_summary(
     group: Mapping[str, Any],
     max_summary_lines: int = MAX_SUMMARY_LINES,
     seed: int = 42,
+    do_sample: bool = True,
+    prompt_style: str = "runtime",
+    task: str = "summary",
 ) -> tuple[str, float]:
     import torch
 
@@ -80,11 +125,8 @@ def generate_summary(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    prompt = tokenizer.apply_chat_template(
-        build_messages(group, max_summary_lines=max_summary_lines),
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=False,
+    prompt = render_generation_prompt(
+        tokenizer, group, max_summary_lines=max_summary_lines, prompt_style=prompt_style, task=task,
     )
     model_inputs = tokenizer([prompt], return_tensors="pt").to(model.device)
 
@@ -92,11 +134,7 @@ def generate_summary(
     with torch.inference_mode():
         generated_ids = model.generate(
             **model_inputs,
-            max_new_tokens=160,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.8,
-            top_k=20,
+            **generation_options(do_sample=do_sample, task=task),
             pad_token_id=tokenizer.eos_token_id,
         )
     elapsed_seconds = perf_counter() - started_at
@@ -109,13 +147,16 @@ def generate_summary(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--case-index", type=int, default=0)
-    parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
+    parser.add_argument("--task", choices=("briefing", "summary"), default="summary")
+    parser.add_argument("--cases", type=Path)
     parser.add_argument(
         "--adapter-path",
         type=Path,
         help="local path to a trained PEFT/LoRA adapter",
     )
     args = parser.parse_args()
+    args.cases = args.cases or (DEFAULT_CASES_PATH.parent / "category_briefing" / "evaluation_cases.jsonl"
+                               if args.task == "briefing" else DEFAULT_CASES_PATH)
 
     cases = load_cases(args.cases)
     if not 0 <= args.case_index < len(cases):
@@ -144,6 +185,7 @@ def main() -> None:
         model=model,
         group=group,
         max_summary_lines=max_summary_lines,
+        task=args.task,
     )
 
     print("\n=== Raw response ===")
@@ -151,12 +193,16 @@ def main() -> None:
     print(f"\nLatency: {elapsed_seconds:.2f}s")
 
     try:
-        parsed = parse_summary_response(raw_response)
+        if args.task == "briefing":
+            decision = parse_response(raw_response)
+            payload = {"primary_category": decision.primary_category, "summary_lines": list(decision.summary_lines)}
+        else:
+            payload = {"summary_lines": list(parse_summary_response(raw_response))}
     except ValueError as exc:
         raise SystemExit(f"Invalid structured response: {exc}") from exc
 
     print("\n=== Parsed summary ===")
-    print(json.dumps({"summary_lines": list(parsed)}, ensure_ascii=False, indent=2))
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

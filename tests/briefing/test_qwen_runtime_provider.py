@@ -20,8 +20,6 @@ def briefing_item(
     title: str,
     body: str,
     category: str = "일반 업무",
-    urgency: int = 3,
-    relevance: int = 3,
 ) -> BriefingItem:
     return BriefingItem(
         notification=RawNotification.from_mapping(
@@ -38,8 +36,6 @@ def briefing_item(
             {
                 "notification_id": notification_id,
                 "is_passed": False,
-                "urgency_score": urgency,
-                "relevance_score": relevance,
                 "category": category,
                 "ai_summary_reason": "가상 테스트 판단",
             }
@@ -71,8 +67,6 @@ class QwenRuntimeProviderTests(unittest.TestCase):
                 title="로그인 API 오류",
                 body="로그인 API에서 500 오류가 발생했습니다.",
                 category="긴급 업무",
-                urgency=5,
-                relevance=4,
             ),
             briefing_item(
                 "latest",
@@ -80,19 +74,15 @@ class QwenRuntimeProviderTests(unittest.TestCase):
                 title="로그인 API 정상화",
                 body="배포가 완료되어 로그인 API가 정상화되었습니다.",
                 category="긴급 업무",
-                urgency=4,
-                relevance=5,
             ),
         )
 
-    def test_group_context_preserves_order_category_and_score_ranges(self) -> None:
+    def test_group_context_preserves_order_category_without_scores(self) -> None:
         context = build_group_context(tuple(reversed(self.items)))
 
         self.assertEqual(context["category"], "긴급 업무")
-        self.assertEqual(
-            context["urgency_score"],
-            {"min": 4, "max": 5, "average": 4.5},
-        )
+        self.assertNotIn("urgency_score", context)
+        self.assertNotIn("relevance_score", context)
         self.assertEqual(
             [item["id"] for item in context["notifications"]],
             ["older", "latest"],
@@ -102,7 +92,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
         backend = FakeBackend(
             '{"summary_lines":["로그인 API가 정상화되었습니다."]}'
         )
-        provider = QwenBriefingProvider(backend=backend)
+        provider = QwenBriefingProvider(backend=backend, contract="summary")
 
         summary = provider.summarize(self.items)
 
@@ -110,11 +100,13 @@ class QwenRuntimeProviderTests(unittest.TestCase):
         self.assertIsNotNone(backend.messages)
         prompt = backend.messages[-1]["content"]
         self.assertIn("로그인 API 정상화", prompt)
+        self.assertNotIn("urgency_score", prompt)
+        self.assertNotIn("relevance_score", prompt)
         self.assertNotIn('"older"', prompt)
         self.assertNotIn('"latest"', prompt)
 
     def test_provider_uses_rule_based_fallback_when_model_fails(self) -> None:
-        provider = QwenBriefingProvider(backend=FailingBackend())
+        provider = QwenBriefingProvider(backend=FailingBackend(), contract="summary")
 
         with self.assertLogs("src.briefing.qwen_provider", level="ERROR"):
             summary = provider.summarize(self.items)
@@ -132,6 +124,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
         provider = QwenBriefingProvider(
             backend=FailingBackend(),
             allow_fallback=False,
+            contract="summary",
         )
 
         with self.assertRaisesRegex(RuntimeError, "synthetic model failure"):
@@ -139,7 +132,7 @@ class QwenRuntimeProviderTests(unittest.TestCase):
 
     def test_pipeline_accepts_qwen_provider_without_contract_changes(self) -> None:
         backend = FakeBackend(
-            '{"summary_lines":["로그인 API가 정상화되었습니다."]}'
+            '{"primary_category":"긴급 업무","summary_lines":["로그인 API가 정상화되었습니다."]}'
         )
         service = SessionBriefingService(
             provider=QwenBriefingProvider(backend=backend)
@@ -162,8 +155,6 @@ class QwenRuntimeProviderTests(unittest.TestCase):
                 {
                     "notification_id": item.filter_result.notification_id,
                     "is_passed": item.filter_result.is_passed,
-                    "urgency_score": item.filter_result.urgency_score,
-                    "relevance_score": item.filter_result.relevance_score,
                     "category": item.filter_result.category,
                     "ai_summary_reason": item.filter_result.ai_summary_reason,
                 }
