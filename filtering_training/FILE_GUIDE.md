@@ -15,6 +15,7 @@
 | `quality/audit_dataset.py` | 카테고리·점수 분포, 중복·모순 검사 |
 | `quality/audit_context_shortcut.py` | 창 정보만으로 관련도 정답을 추측할 수 있는 편향 검사 |
 | `modeling/train.py` | Qwen LoRA/QLoRA 학습과 어댑터 저장 |
+| `modeling/encoder_score_experiment.py` | KLUE·mmBERT 공유 Encoder 전체 학습·점수 헤드 검증·ONNX/INT8 변환·CPU 100회 비교 |
 | `modeling/train_linear_baseline.py` | TF-IDF + LinearSVC 분류 기준선 학습 |
 | `modeling/evaluate.py` | 기본 모델·어댑터의 점수와 통과/차단 평가, 개별 출력·시간 저장 |
 | `modeling/infer_sample.py` | 개별 알림·JSON 파일·지속 실행 스트림 추론 및 출력 JSON 확인 |
@@ -54,6 +55,18 @@
 않는 이전 기본 경로·양식의 도구를 명시적으로 분리했습니다.
 
 ## 입력 자료와 결과 자료
+
+현재 기본 학습 자료는 `outputs/v7_relevance_ladder_01/prepared_laya_v2/`이다. 추가 검수 후보 10건은 `outputs/v8_encoder_boundary_review_01/review.md`이며, 확정·병합 전 상태다.
+
+2026-10-10 안전 보강 모델은 `outputs/runs/2026-10-10-base-safety-continue-01/`이다.
+`generation/prepare_boundary_supplement.py`는 소규모 3/4 경계·관련도 대조쌍 84행과 개발·새 평가를 생성한다.
+`modeling/continue_encoder_boundary.py`는 부모 모델을 후보 0으로 보존하고 기존 성능이 떨어지는 추가 학습을 채택하지 않는다.
+이번 `outputs/runs/2026-10-10-base-boundary-continue-01/`의 학습 에폭 1은 기존 정책 정확도 하락으로 제외했다.
+`modeling/prepare_csharp_fixtures.py`는 Python의 입력·토큰·점수를 고정해 C#과 비교한다.
+재사용 C# 모듈·실제 앱 계약 어댑터·검증 프로그램·전달 생성기는 저장소의 `integration/csharp/`에 둔다.
+현재 전달 ZIP은 `outputs/handoff/ALTONG_filtering_csharp_2026-10-10_actual.zip`이며 기본값은 실제 차단·통과다.
+연결 방법은 `integration/csharp/README.md`를 따른다.
+
 
 `data/`의 세 기존 파일은 내용과 위치를 유지했습니다. 실제 알림 샘플 내용은 이번 정리에서
 열거나 학습에 사용하지 않았습니다. 결과 폴더별 설명은 [ARTIFACTS.md](docs/ARTIFACTS.md)를 참고하세요.
@@ -242,3 +255,70 @@ V5의 `dataset.jsonl`과 `diversified.jsonl`, `candidates.jsonl`과 `revised.jso
 SHA-256이 동일하다. 최신·직전 모델, 데이터셋, 실험 로그, 코드, 캐시 및 Git 작업 트리는
 변경하지 않았다. 해당 압축본에서 과거 모델 가중치를 복원하는 기능은 없어졌다.
 보관 목록과 `docs/ARTIFACTS.md` 및 이 안내만 현재 상태에 맞춰 갱신했다.
+
+## 2026-10-09 Laya 비교 작업
+
+`modeling/laya_score_experiment.py`는 기존 Qwen 검증 원문·문맥·정답·예측 해시를 확인하고,
+같은 승인 검증 74행을 Laya 다국어 모델로 평가한다. `--dry-run`은 모델을 로딩하거나
+출력 폴더를 생성하지 않는다. `--reverse-options`는 점수 정의를 유지하며 선택지 순서만 바꾼다.
+긴급도·관련도 입력을 각각 전달하고 다섯 `choice` 라벨을 1~5 점수로 해석한다.
+`--action train`은 기존 Qwen 학습 입력을 메모리에서 Laya 선택지·정답 형식으로 변환한다.
+인코더 attention의 `Wqkv`·`Wo`에 LoRA를 학습하고 분류 head도 함께 업데이트한다.
+기존 파일은 덮어쓰지 않으며 검증·최종 테스트와 V7 제안은 학습에 넣지 않는다.
+기본 동작은 `--action evaluate`이며 기반 모델과 프로젝트 학습 완료 모델을 모두 평가한다.
+
+모델: `outputs/models/laya-multilingual/`, SDK: `laya==0.4.1`.
+고정된 기반 모델 버전은 `1720e3e3357cfe1e281542e223f8273b0890ca34`다.
+초기 평가 결과는 `outputs/runs/2026-10-09-laya-multilingual-base-01/report.json`과
+`report.predictions.jsonl`에 있다. 기존 자료와 V7 재검수 제안은 변경하거나 병합하지 않았다.
+
+학습 실행 폴더에는 `run_config.json`과 `checkpoint/`를 저장한다. 최종 체크포인트는 LoRA를
+합친 일반 Laya 형식이므로 앱 추론에서 어댑터 전환이나 별도의 두 모델을 요구하지 않는다.
+학습 자료 건수·원본 해시·변환 내용 해시·기반 버전·설정·시간·최종 가중치 해시를 기록하며,
+학습을 마친 체크포인트는 저장된 출처와 원본 자료 해시가 일치할 때만 비교한다.
+
+첫 학습 결과는 `outputs/runs/2026-10-09-laya-multilingual-lora-01/`에 있다.
+`validation.json`은 학습된 Laya, `qwen-reference.json`은 같은 날 재평가한 최신 Qwen의 결과다.
+각 `.predictions.jsonl`에 전체 입력과 실제 점수를 보존했고 비교표는 기존 실험 로그 끝에 추가했다.
+`train-fit.json`과 `train-fit.predictions.jsonl`은 같은 저장 모델의 학습 사례 적합도 진단이다.
+점수별 균형 표본 결과이므로 검증·최종 테스트 성능으로 해석하지 않는다.
+
+Laya 전용 질문 v2도 같은 코드의 `LAYA_INSTRUCTIONS_V2`·`LAYA_LEVELS_V2`에서 관리한다.
+`--prompt-version v2` 비교 결과는 같은 실행 폴더의 `prompt-v2-validation.json`과 예측 파일에 있다.
+기존 모델의 기본 질문은 학습 시 버전으로 유지하며, 새 학습의 기본 질문만 v2다.
+
+`--action train-halves`는 준비된 그룹별 두 절반을 같은 모델·옵티마이저·스케줄러로 이어 학습한다.
+이번 실행은 `outputs/runs/2026-10-09-laya-v2-halves-01/`이며 루트 `run_config.json`에
+학습 제외 4,161행·그룹 분할·누적 학습 결과를 기록했다. 원본 데이터·라벨은 보존한다.
+`phase50/`·`phase100/` 각각에 설정·`checkpoint/`·`validation.json`·전체 예측을 저장했다.
+최종 모델은 `phase100/checkpoint/`다. 검증 충돌 후보 4행을 제외한 지표는 같은 예측의 보조 집계다.
+같은 폴더의 `phase100/train-fit.json`·`train-fit.predictions.jsonl`은 실제 학습 입력의 점수별 균형 표본 진단이다.
+진단은 학습 제외 목록과 단계별 학습 순서로 변환 해시를 재현하므로 제외한 행을 평가에 넣지 않는다.
+
+`outputs/v7_relevance_ladder_01/current_priority_preview.jsonl`은 4,161행 제외 후 준비한
+저관련도 대조 원문 10개·최근 창 변형 2행의 미승인 후보다. 같은 폴더 `review.md` 끝에 검수표,
+`manifest.json`의 `current_priority_preview`에 상태·해시·중복 검사·묶음 기준을 기록했다.
+같은 manifest의 `current_priority_semantic_review`와 기존 `review_decisions.jsonl`의
+`current_priority_v2_3000` 회차는 기존 3천 후보의 생성틀·작업/자료 관계 AI 재검토다.
+이전 제안·사용자 승인·원본을 보존하며 수정 제안 113행과 판단 불일치 39행은 미적용 상태다.
+
+`outputs/v7_relevance_ladder_01/prepared_laya_v2/`는 저관련도 보강을 반영한 native Laya v2 학습 입력이다.
+`urgency/train.jsonl` 4,946행, `relevance/train.jsonl` 10,173행, 공통 `manifest.json`에
+원본 선택 인덱스·추가 ID·검수 범위·제외 목록·파일 해시·검증 보존·검사 결과를 모았다.
+기존 모델과 데이터는 보존하며 이 자료의 실제 학습은 2026-10-10 완료했다.
+기존 Laya 실행 코드의 `--action train --prepared-inputs <이 폴더> --dry-run`으로 사전 검사를 재현한다.
+완료된 보강 모델은 `outputs/runs/2026-10-09-laya-v2-low-replenished-01/checkpoint/`이며,
+같은 실행 폴더의 `validation.json`·`train-fit.json`과 예측 파일에 비교·적합도 진단을 보존했다.
+검증 악화로 앱 채택하지 않는다. 준비 당시 manifest는 입력 출처로 보존하고 V7 상위 manifest에 실제 사용 결과를 기록했다.
+
+`outputs/runs/2026-10-10-laya-v2-task-weighted-02/`는 같은 입력·설정에서 과제별 CE 가중치만 바꾸는 비교 실행이다.
+`run_config.json`에 긴급도 명목 손실 비중 39.343%와 과제별 가중치·SDK 루프 해시를 기록한다.
+`task-weighted-01/`은 인자 오류로 첫 업데이트 전 종료한 실행 기록만 보존한다.
+2026-10-10 완료했으며 `checkpoint/`, `validation.json`·`train-fit.json` 및 예측에 결과를 저장했다.
+고정 검증 통과·차단 42/74, 긴급 누락 16/17로 앱에 채택하지 않는다.
+
+`modeling/benchmark_digit_cpu.py`는 기존 Qwen 점수 모델의 GGUF CPU 정확도·100회 지연·로딩된 대기 자원을 측정한다.
+`outputs/models/qwen3-06b-cpu/`에 `base-Q8_0.gguf`(805MB)·두 점수 LoRA(각 2.3MB)·CPU runtime·변환 출처 manifest를 보관한다.
+`conversion-source/`·변환 로그는 재현용이며 실제 앱에서 읽는 모델은 세 GGUF 파일이다.
+`outputs/runs/2026-10-10-qwen06-cpu-01/`의 `report.json`, 예측 100행·자원 표본·`server.log`에 실측을 저장했다.
+앱용 API 입력 방법은 README의 Qwen CPU 항목을 참고한다. 원본 모델·자료·최종 테스트는 변경하지 않았다.

@@ -8,3 +8,12 @@ accelerate
 bitsandbytes
 scikit-learn
 sentencepiece
+
+# Pinned multilingual comparison SDK; existing Torch/Transformers builds remain usable.
+laya==0.4.1
+psutil
+
+# Encoder CPU export and deployment comparison.
+onnx==1.23.2
+onnxruntime==1.31.0
+onnxscript==0.7.2
