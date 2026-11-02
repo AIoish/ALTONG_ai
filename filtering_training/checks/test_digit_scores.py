@@ -46,112 +46,23 @@ class DigitScoreTests(unittest.TestCase):
         self.assertEqual(actual['policy_correct'], 4)
         self.assertEqual(actual['urgent_false_blocks'], 1)
 
-    def test_cpu_completion_keeps_only_selected_adapter_and_digit_output(self):
-        from filtering_training.modeling.benchmark_digit_cpu import completion_payload, parse_choice
-        for task, ident in (("urgency", 0), ("relevance", 1)):
-            request = completion_payload([10, 11], task)
-            self.assertEqual(request["lora"], [{"id": ident, "scale": 1.0}])
-            self.assertEqual(request["n_predict"], 1)
-            self.assertEqual(request["grammar"], "root ::= [1-5]")
-            self.assertFalse(request["cache_prompt"])
-        self.assertEqual(parse_choice({"content": "4", "tokens": [19]}, [16,17,18,19,20]), 4)
-        for invalid in ({"content": "4", "tokens": [18]}, {"content": "4", "tokens": [19], "truncated": True},
-                        {"content": "reason: 4", "tokens": [19]}):
-            with self.assertRaises(ValueError):
-                parse_choice(invalid, [16,17,18,19,20])
 
-    def test_laya_task_weighting_preserves_budget_and_scales_gradients(self):
-        from types import SimpleNamespace
-        from unittest.mock import patch
-        import laya.train as sdk
-        from filtering_training.modeling.laya_score_experiment import task_loss_weights, train_task_weighted
-        counts = {"urgency": 4946, "relevance": 10173}
-        share = 4936 / (4936 + 7610)
-        weights = task_loss_weights(counts, share)
-        self.assertAlmostEqual(sum(counts[t] * weights[t] for t in counts), sum(counts.values()))
-        self.assertAlmostEqual(counts["urgency"] * weights["urgency"] / sum(counts.values()), share)
-        parameter = torch.tensor(2.0, requires_grad=True)
-        items = [{"_filtering_task": t} for t in ("urgency", "relevance")]
-        config = SimpleNamespace(micro_batch=1, loss="soft-ce", epochs=1)
-        seen = []
-        def loop(model, tok, rows, config, device, max_len, head_max_len):
-            for item in reversed(rows):
-                sdk.encode_item(tok, item)
-                parameter.grad = None
-                value = sdk.soft_ce_loss()
-                value.backward()
-                seen.append((item["_filtering_task"], value.item(), parameter.grad.item()))
-            return [1.0]
-        with patch.object(sdk, "encode_item", return_value={}) as encoder, \
-             patch.object(sdk, "soft_ce_loss", side_effect=lambda: parameter.square()) as loss, \
-             patch.object(sdk, "train_model", side_effect=loop):
-            self.assertEqual(train_task_weighted(None, None, items, config, "cpu", 1024, 256, weights), [1.0])
-            self.assertIs(sdk.encode_item, encoder)
-            self.assertIs(sdk.soft_ce_loss, loss)
-            self.assertEqual(encoder.call_count, 2)
-        for task, value, gradient in seen:
-            self.assertAlmostEqual(value, 4 * weights[task], places=5)
-            self.assertAlmostEqual(gradient, 4 * weights[task], places=5)
-        for invalid in (0, 1, float("nan")):
-            with self.assertRaises(ValueError):
-                task_loss_weights(counts, invalid)
-        config.micro_batch = 2
-        with self.assertRaisesRegex(ValueError, "micro_batch=1"):
-            train_task_weighted(None, None, items, config, "cpu", 1024, 256, weights)
-
-    def test_laya_task_weighting_rejects_missing_losses_and_restores_sdk(self):
-        from types import SimpleNamespace
-        from unittest.mock import patch
-        import laya.train as sdk
-        from filtering_training.modeling.laya_score_experiment import train_task_weighted
-        config = SimpleNamespace(micro_batch=1, loss="soft-ce", epochs=1)
-        with patch.object(sdk, "train_model", return_value=[]) as trainer:
-            encode, loss = sdk.encode_item, sdk.soft_ce_loss
-            with self.assertRaisesRegex(ValueError, "exact training population"):
-                train_task_weighted(None, None, [{"_filtering_task": "urgency"}], config,
-                                    "cpu", 1024, 256, {"urgency": 1.0})
-            self.assertIs(sdk.encode_item, encode)
-            self.assertIs(sdk.soft_ce_loss, loss)
-
-    def test_laya_task_weighting_runs_actual_sdk_loop(self):
-        from types import SimpleNamespace
-        from unittest.mock import patch
-        import laya.train as sdk
-        from filtering_training.modeling.laya_score_experiment import train_task_weighted
-        model = torch.nn.Linear(1, 1)
-        config = sdk.TrainConfig(epochs=1, micro_batch=1, grad_accum=2, loss="soft-ce",
-                                amp=False, gradient_checkpointing=False, log_every=0)
-        items = [{"_filtering_task": task, "q": {"t": "choice"}, "k": 5}
-                 for task in ("urgency", "relevance")]
-        batch = {"marker_mask": torch.ones(1), "target": torch.ones(1)}
-        seen = []
-        def encode(tok, item, *args):
-            seen.append(item["_filtering_task"])
-            return {}
-        with patch.object(sdk, "encode_item", side_effect=encode), \
-             patch.object(sdk, "collate_items", return_value=batch), \
-             patch.object(sdk, "_forward", side_effect=lambda model, *args: model(torch.ones(1, 1))), \
-             patch.object(sdk, "soft_ce_loss", side_effect=lambda logits, *args: logits.square().mean()):
-            result = train_task_weighted(model, SimpleNamespace(pad_token_id=0), items, config,
-                                        torch.device("cpu"), 1024, 256, {"urgency": 1.2, "relevance": .9})
-        self.assertEqual(len(result), 1)
-        self.assertEqual(sorted(seen), ["relevance", "urgency"])
-
-    def test_laya_native_prepared_rejects_changed_hash_and_urgency_context(self):
+    def test_encoder_native_prepared_rejects_changed_hash_and_urgency_context(self):
         import json
         import tempfile
-        from filtering_training.modeling import laya_score_experiment as experiment
+        from filtering_training.common import encoder_data as experiment
         from filtering_training.preparation.prepare_score_experiment import write_json, write_lines, digest
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             manifest = {"format": "native_laya_choice_v2", "prompt_version": "v2",
-                        "protected_hashes": {}, "files": {}, "counts": {}}
+                        "protected_hashes": {"filtering_training/outputs/models/laya-multilingual/model.safetensors": "archived"},
+                        "files": {}, "counts": {}}
             for task in ("urgency", "relevance"):
                 (root / task).mkdir()
                 state = {"notification": {"body": "example"}}
                 if task == "relevance":
                     state["context"] = {"window_title": "example task"}
-                row = {"state": state, "questions": {task: experiment.question(task, "", prompt_version="v2")},
+                row = {"state": state, "questions": {task: experiment.prepared_question(task)},
                        "expected": {task: "2"}}
                 path = root / task / "train.jsonl"
                 write_lines(path, [row])
@@ -172,184 +83,6 @@ class DigitScoreTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "context separation"):
                 experiment.load_native_prepared(root)
 
-    def test_laya_fit_diagnosis_uses_only_actual_two_phase_training_rows(self):
-        import hashlib
-        import json
-        import tempfile
-        from unittest.mock import patch
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.common.score_tasks import sft_record
-        from filtering_training.modeling import laya_score_experiment as experiment
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            sources = {}
-            for task in ("urgency", "relevance"):
-                sources[task] = [sft_record(sample(urgency=i, relevance=i), task)
-                                 for i in range(1, 6) for _ in range(2)]
-                (root / task).mkdir()
-                (root / task / "train.jsonl").write_text(
-                    "\n".join(json.dumps(row) for row in sources[task]), encoding="utf-8")
-            phases = [{"source_indices": {"urgency": [0, 2, 4, 6, 8], "relevance": [0, 2, 4, 6]}, "groups": ["A"]},
-                      {"source_indices": {"urgency": [1, 3, 5, 7, 9], "relevance": [3, 5, 7, 8, 9]}, "groups": ["B"]}]
-            parent = {"status": "completed", "selected_policy": "exclude",
-                      "conflicting_relevance_rows": [{"source_index": 1}],
-                      "proposed_alternatives": {"exclude": {"phases": phases}}}
-            (root / "run_config.json").write_text(json.dumps(parent), encoding="utf-8")
-            view = hashlib.sha256()
-            for phase in phases:
-                for task in sources:
-                    for index in phase["source_indices"][task]:
-                        row = experiment.training_row(sources[task][index], task, "v2")
-                        view.update((json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
-            stage = root / "phase100"
-            stage.mkdir()
-            run = {"excluded_relevance_rows": 1, "prompt_version": "v2",
-                   "train_counts": {"urgency": 10, "relevance": 9}, "training_view_sha256": view.hexdigest()}
-            (stage / "run_config.json").write_text(json.dumps(run), encoding="utf-8")
-            with patch.object(experiment, "PREPARED", root), \
-                 patch.object(experiment, "preflight", return_value=(None, None, None,
-                     {"training_status": "project-fine-tuned Laya", "preserved_hashes": {}})), \
-                 patch("builtins.print"):
-                result = experiment.diagnose_train(stage / "fit.json", stage / "checkpoint",
-                                                   root / "unused.json", "cpu", dry_run=True)
-                self.assertEqual(result["sampling"]["relevance"]["population_by_score"][1], 1)
-                self.assertEqual(sum(result["sampling"]["relevance"]["population_by_score"].values()), 9)
-                self.assertEqual(result["training_view_sha256"], view.hexdigest())
-
-    def test_laya_half_plan_rejects_excluded_rows_overlap_and_missing_sources(self):
-        from copy import deepcopy
-        from filtering_training.modeling.laya_score_experiment import validate_half_indices
-        phases = [{"source_indices": {"urgency": [0, 1, 2], "relevance": [0, 1]}, "groups": ["A"]},
-                  {"source_indices": {"urgency": [3, 4, 5], "relevance": [2, 3, 4]}, "groups": ["B"]}]
-        validate_half_indices(phases, {"urgency": 6, "relevance": 6}, {5})
-        for mutation in ("excluded", "overlap", "missing", "group"):
-            invalid = deepcopy(phases)
-            if mutation == "excluded":
-                invalid[1]["source_indices"]["relevance"].append(5)
-            elif mutation == "overlap":
-                invalid[1]["source_indices"]["urgency"].append(0)
-            elif mutation == "missing":
-                invalid[0]["source_indices"]["urgency"].pop()
-            else:
-                invalid[1]["groups"] = ["A"]
-            with self.assertRaises(ValueError):
-                validate_half_indices(invalid, {"urgency": 6, "relevance": 6}, {5})
-
-    def test_laya_v2_training_and_inference_use_identical_questions(self):
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.common.score_tasks import sft_record
-        from filtering_training.modeling.laya_score_experiment import request, training_row
-        source = sample(urgency=5, relevance=4)
-        for task in ("urgency", "relevance"):
-            state, questions = request(source, task, prompt_version="v2")
-            train = training_row(sft_record(source, task), task, prompt_version="v2")
-            self.assertEqual((train["state"], train["questions"]), (state, questions))
-            self.assertEqual(train["expected"], {task: str(getattr(source.label, task + "_score"))})
-            self.assertNotIn("id", state["notification"])
-            if task == "urgency":
-                self.assertNotIn("context", state)
-
-    @unittest.skipUnless(Path("filtering_training/outputs/models/laya-multilingual/tokenizer/tokenizer.json").is_file(),
-                         "pinned multilingual tokenizer is a local artifact")
-    def test_laya_v2_question_and_all_options_fit_without_clipping(self):
-        from transformers import AutoTokenizer
-        from filtering_training.modeling.laya_score_experiment import question, question_budget
-        tok = AutoTokenizer.from_pretrained("filtering_training/outputs/models/laya-multilingual/tokenizer",
-                                           local_files_only=True)
-        for task in ("urgency", "relevance"):
-            for reverse in (False, True):
-                q = question(task, "", reverse=reverse, prompt_version="v2")
-                budget = question_budget(tok, task, {task: q})
-                self.assertFalse(budget["clipped"])
-                self.assertLessEqual(budget["head_tokens"], 256)
-                self.assertEqual(set(q["criteria"]), {"1", "2", "3", "4", "5"})
-
-    def test_laya_fit_diagnosis_deduplicates_and_checks_actual_training_hash(self):
-        import hashlib
-        import json
-        import tempfile
-        from unittest.mock import patch
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.common.score_tasks import sft_record
-        from filtering_training.modeling import laya_score_experiment as experiment
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            converted = hashlib.sha256()
-            for task in ("urgency", "relevance"):
-                records = [sft_record(sample(urgency=i, relevance=i), task)
-                           for i in range(1, 6) for _ in range(2)]
-                target = root / task
-                target.mkdir()
-                (target / "train.jsonl").write_text(
-                    "\n".join(json.dumps(r) for r in records), encoding="utf-8")
-                for record in records:
-                    converted.update((json.dumps(experiment.training_row(record, task),
-                                                 ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
-            run_file = root / "run_config.json"
-            run = {"train_counts": {"urgency": 10, "relevance": 10},
-                   "training_view_sha256": converted.hexdigest()}
-            run_file.write_text(json.dumps(run), encoding="utf-8")
-            plan = {"training_status": "project-fine-tuned Laya"}
-            with patch.object(experiment, "PREPARED", root), \
-                 patch.object(experiment, "preflight", return_value=(None, None, None, plan)), \
-                 patch("builtins.print"):
-                output = root / "diagnostic.json"
-                result = experiment.diagnose_train(output, root / "checkpoint", root / "unused.json",
-                                                   "cpu", per_score=2, dry_run=True)
-                self.assertEqual(result["evaluated_task_rows"], 10)
-                self.assertEqual(result["sampling"]["urgency"]["selected_by_score"],
-                                 {i: 1 for i in range(1, 6)})
-                self.assertFalse(output.exists())
-                run["training_view_sha256"] = "different"
-                run_file.write_text(json.dumps(run), encoding="utf-8")
-                with self.assertRaisesRegex(ValueError, "actual completed training run"):
-                    experiment.diagnose_train(output, root / "checkpoint", root / "unused.json",
-                                              "cpu", dry_run=True)
-
-    def test_laya_training_conversion_preserves_labels_without_context_leakage(self):
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.common.score_tasks import sft_record
-        from filtering_training.modeling.laya_score_experiment import training_row
-        source = sample(urgency=5, relevance=1)
-        urgency = training_row(sft_record(source, "urgency"), "urgency")
-        relevance = training_row(sft_record(source, "relevance"), "relevance")
-        self.assertEqual(urgency["expected"], {"urgency": "5"})
-        self.assertEqual(relevance["expected"], {"relevance": "1"})
-        self.assertNotIn("context", urgency["state"])
-        self.assertNotIn("id", relevance["state"]["notification"])
-        self.assertEqual(relevance["state"]["context"]["window_title"], "secret-context")
-        self.assertNotIn("gold", relevance["state"])
-        self.assertNotIn("label", relevance["state"])
-
-    def test_laya_training_rejects_non_integer_target(self):
-        import json
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.common.score_tasks import sft_record
-        from filtering_training.modeling.laya_score_experiment import training_row
-        record = sft_record(sample(), "urgency")
-        record["messages"][-1]["content"] = json.dumps({"urgency_score": True})
-        with self.assertRaisesRegex(ValueError, "original label range"):
-            training_row(record, "urgency")
-
-    def test_laya_urgency_input_never_contains_work_context_or_variant_id(self):
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.modeling.laya_score_experiment import request
-        state, questions = request(sample(), "urgency")
-        self.assertNotIn("context", state)
-        self.assertNotIn("id", state["notification"])
-        self.assertNotIn("secret-context", str(state))
-        self.assertEqual(questions["urgency"]["type"], "choice")
-
-    def test_laya_reversing_options_preserves_score_meaning_and_context(self):
-        from filtering_training.checks.test_score_separation import sample
-        from filtering_training.modeling.laya_score_experiment import request
-        normal_state, normal = request(sample(), "relevance")
-        reversed_state, reversed_questions = request(sample(), "relevance", reverse=True)
-        self.assertEqual(normal_state, reversed_state)
-        self.assertEqual(normal_state["context"]["window_title"], "secret-context")
-        self.assertNotIn("id", normal_state["notification"])
-        self.assertEqual(normal["relevance"]["criteria"], reversed_questions["relevance"]["criteria"])
-        self.assertEqual(list(reversed_questions["relevance"]["criteria"]), ["5", "4", "3", "2", "1"])
 
     def test_epoch_schedule_counts_optimizer_steps_and_partial_tail(self):
         from filtering_training.modeling.digit_score_experiment import training_schedule

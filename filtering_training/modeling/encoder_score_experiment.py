@@ -54,9 +54,10 @@ def input_text(state, task):
 
 def validation():
     from filtering_training.modeling.digit_score_experiment import load_validation_for_evaluation, VALIDATION_POOL
-    from filtering_training.modeling.laya_score_experiment import request
+    from filtering_training.common.digit_scores import replace_prompt
+    from filtering_training.common.score_tasks import messages
     samples, groups, _ = load_validation_for_evaluation(VALIDATION_POOL)
-    texts = [[input_text(request(s, task, prompt_version='v2')[0], task) for task in TASKS]
+    texts = [[input_text(json.loads(replace_prompt(messages(s, task), task)[1]['content']), task) for task in TASKS]
              for s in samples]
     return samples, groups, texts
 
@@ -116,7 +117,7 @@ def train(run, base=BASE, micro_batch=4, attention="eager", fused_adam=False, re
     import numpy as np
     import torch
     from transformers import AutoTokenizer, get_linear_schedule_with_warmup
-    from filtering_training.modeling.laya_score_experiment import load_native_prepared
+    from filtering_training.common.encoder_data import load_native_prepared
     if run.exists():
         raise ValueError('preserve existing run; choose fresh directory')
     random.seed(42)
@@ -132,14 +133,12 @@ def train(run, base=BASE, micro_batch=4, attention="eager", fused_adam=False, re
         records.extend((e, task_id, int(r['expected'][task]) - 1) for e, r in zip(encoded, sources[task]))
         lengths.extend(sizes)
     val_encoded, val_lengths = encode_checked(tok, [t for pair in texts for t in pair])
-    # Full provenance includes base model, approved validation and CPU reference predictions.
+    # Preserve the base model and approved validation provenance.
     for artifact in base.iterdir():
         if artifact.is_file():
             protected[str(artifact)] = digest(artifact)
     for name in ('filtering_training/outputs/v5_validation_pool_01/manifest.json',
-                 'filtering_training/outputs/v5_validation_pool_01/approval.json',
-                 'filtering_training/outputs/runs/2026-10-10-qwen06-cpu-01/report.json',
-                 'filtering_training/outputs/runs/2026-10-10-qwen06-cpu-01/report.predictions.jsonl'):
+                 'filtering_training/outputs/v5_validation_pool_01/approval.json'):
         protected[name] = digest(name)
     counts = [len(sources[t]) for t in TASKS]
     weights = [len(records) / (2 * n) for n in counts]
@@ -320,7 +319,7 @@ def cpu_worker(run, variant):
         return {'input_ids': ids, 'attention_mask': mask}
 
     def predict(index):
-        # Two separate forward passes, like the Qwen CPU reference; pretokenized input.
+        # Two separate forward passes using pretokenized input.
         logits = [session.run(None, arrays([encoded[2 * index + j]]))[0][0, j] for j in range(2)]
         return {task + '_score': int(logits[j].argmax()) + 1 for j, task in enumerate(TASKS)}, logits
 
@@ -336,10 +335,9 @@ def cpu_worker(run, variant):
     thread.start()
     time.sleep(30)
     phase[0] = 'active'
-    reference = read(ROOT / 'filtering_training/outputs/runs/2026-10-10-qwen06-cpu-01/report.json')
-    indices = reference['selected_validation_indices']
-    if len(indices) != 100 or len(set(indices[:74])) != 74:
-        raise ValueError('CPU reference must contain fixed 74 validation rows then repeats')
+    if len(samples) != 74:
+        raise ValueError('CPU benchmark expects the approved 74 validation rows')
+    indices = list(range(len(samples))) + list(range(26))
     rows, seconds, preds = [], [], {}
     cpu_start = sum(process.cpu_times()[:2])
     wall_start = time.perf_counter()

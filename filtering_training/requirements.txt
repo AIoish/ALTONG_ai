@@ -9,8 +9,7 @@ bitsandbytes
 scikit-learn
 sentencepiece
 
-# Pinned multilingual comparison SDK; existing Torch/Transformers builds remain usable.
-laya==0.4.1
+# Encoder CPU resource measurements.
 psutil
 
 # Encoder CPU export and deployment comparison.
