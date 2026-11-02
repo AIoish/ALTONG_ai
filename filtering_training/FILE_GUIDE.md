@@ -15,6 +15,7 @@
 | `quality/audit_dataset.py` | 카테고리·점수 분포, 중복·모순 검사 |
 | `quality/audit_context_shortcut.py` | 창 정보만으로 관련도 정답을 추측할 수 있는 편향 검사 |
 | `modeling/train.py` | Qwen LoRA/QLoRA 학습과 어댑터 저장 |
+| `modeling/encoder_score_experiment.py` | KLUE·mmBERT 공유 Encoder 전체 학습·점수 헤드 검증·ONNX/INT8 변환·CPU 100회 비교 |
 | `modeling/train_linear_baseline.py` | TF-IDF + LinearSVC 분류 기준선 학습 |
 | `modeling/evaluate.py` | 기본 모델·어댑터의 점수와 통과/차단 평가, 개별 출력·시간 저장 |
 | `modeling/infer_sample.py` | 개별 알림·JSON 파일·지속 실행 스트림 추론 및 출력 JSON 확인 |
@@ -54,6 +55,18 @@
 않는 이전 기본 경로·양식의 도구를 명시적으로 분리했습니다.
 
 ## 입력 자료와 결과 자료
+
+현재 기본 학습 자료는 `outputs/v7_relevance_ladder_01/prepared_laya_v2/`이다. 추가 검수 후보 10건은 `outputs/v8_encoder_boundary_review_01/review.md`이며, 확정·병합 전 상태다.
+
+2026-10-10 안전 보강 모델은 `outputs/runs/2026-10-10-base-safety-continue-01/`이다.
+`generation/prepare_boundary_supplement.py`는 소규모 3/4 경계·관련도 대조쌍 84행과 개발·새 평가를 생성한다.
+`modeling/continue_encoder_boundary.py`는 부모 모델을 후보 0으로 보존하고 기존 성능이 떨어지는 추가 학습을 채택하지 않는다.
+이번 `outputs/runs/2026-10-10-base-boundary-continue-01/`의 학습 에폭 1은 기존 정책 정확도 하락으로 제외했다.
+`modeling/prepare_csharp_fixtures.py`는 Python의 입력·토큰·점수를 고정해 C#과 비교한다.
+재사용 C# 모듈·실제 앱 계약 어댑터·검증 프로그램·전달 생성기는 저장소의 `integration/csharp/`에 둔다.
+현재 전달 ZIP은 `outputs/handoff/ALTONG_filtering_csharp_2026-10-10_actual.zip`이며 기본값은 실제 차단·통과다.
+연결 방법은 `integration/csharp/README.md`를 따른다.
+
 
 `data/`의 세 기존 파일은 내용과 위치를 유지했습니다. 실제 알림 샘플 내용은 이번 정리에서
 열거나 학습에 사용하지 않았습니다. 결과 폴더별 설명은 [ARTIFACTS.md](docs/ARTIFACTS.md)를 참고하세요.
@@ -242,3 +255,10 @@ V5의 `dataset.jsonl`과 `diversified.jsonl`, `candidates.jsonl`과 `revised.jso
 SHA-256이 동일하다. 최신·직전 모델, 데이터셋, 실험 로그, 코드, 캐시 및 Git 작업 트리는
 변경하지 않았다. 해당 압축본에서 과거 모델 가중치를 복원하는 기능은 없어졌다.
 보관 목록과 `docs/ARTIFACTS.md` 및 이 안내만 현재 상태에 맞춰 갱신했다.
+
+## KLUE 입력 자료 검증
+
+`common/encoder_data.py`는 기존 고정 자료의 스키마·점수·질문·해시를 검사한다.
+`prepared_laya_v2`는 보존된 자료의 과거 경로 이름이며 Laya SDK나 모델 실행을 요구하지 않는다.
+원본 manifest는 해시로 보호하고, KLUE 입력에 쓰이지 않는 과거 모델·실험 실행 파일은 로딩 조건에서 제외한다.
+과거 Qwen·Laya 비교 결과는 실험 로그에 보존하며 전용 실행 도구는 이번 변경에서 제외한다.

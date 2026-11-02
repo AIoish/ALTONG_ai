@@ -3,6 +3,47 @@
 필터링 데이터 생성, 검수, 학습, 평가에 사용하는 오프라인 도구입니다.
 파일별 역할과 현재 사용 여부는 [FILE_GUIDE.md](FILE_GUIDE.md)를 참고하세요.
 
+## 한국어 Encoder CPU 비교
+
+현재 사용 모델은 KLUE이며 Qwen·Laya 전용 비교 도구와 Laya SDK 의존성은 포함하지 않습니다.
+기존 고정 자료의 `prepared_laya_v2` 경로·스키마 이름은 데이터 보존을 위해 유지합니다.
+CPU 100회 측정은 승인 검증 74건 전체와 앞 26건 반복으로 구성하며 과거 Qwen 실행 결과를 요구하지 않습니다.
+
+모델 크기 비교에는 `--base outputs의_로컬_모델_경로 --fp32-only`를 사용합니다. 기존 실행 폴더는 덮어쓸 수 없습니다.
+2026-10-10 비교 모델은 `klue-roberta-small`, `klue-roberta-large`, `jhu-clsp-mmBERT-small`이며 원본 revision은 각 모델 폴더의 `manifest.json`에 기록했습니다.
+large의 6GB GPU 실행은 `--micro-batch 2 --attention sdpa --fused-adam --release-cuda-cache`와 `PYTORCH_ALLOC_CONF=garbage_collection_threshold:0.7,max_split_size_mb:64`를 사용합니다. 실효 배치는 16으로 유지합니다.
+
+
+`modeling/encoder_score_experiment.py`는 최신 정제 학습 자료의 원본·라벨·분할을 유지하고
+KLUE RoBERTa 또는 mmBERT와 긴급도·관련도 5클래스 헤드를 전체 학습합니다. 모델 가중치는 하나이며,
+긴급도에는 알림만, 관련도에는 알림과 실제 현재·최근 창 정보를 넣어 각각 처리합니다.
+작업 설명을 추측해 입력에 추가하지 않으며, 512토큰을 넘으면 잘라서 학습하지 않고 중단합니다.
+
+```powershell
+python -m filtering_training.modeling.encoder_score_experiment --action all --run filtering_training/outputs/runs/2026-10-10-klue-base-02
+```
+
+기존 실행 폴더를 덮어쓰지 않습니다. 최대 3에폭, 승인 검증 74행으로 체크포인트를 선택하고
+최종 테스트는 사용하지 않습니다. 같은 체크포인트의 FP32 ONNX와 동적 INT8을 CPU 4스레드로
+각 100회 측정합니다. 시간은 미리 토큰화한 입력의 두 점수 추론이며 앱 입력 수집 시간은 제외합니다.
+메모리는 Torch를 불러오지 않는 독립 Python CPU 프로세스 전체 RSS로, C# 앱 전체 RAM과 다릅니다.
+학습 조건이 다른 기존 Qwen/Laya 결과는 앱 교체 판단의 기준이며 구조만의 우열을 증명하지 않습니다.
+
+모델·토크나이저·설정·에폭별 검증·변환 출처·CPU 예측은 해당 실행 폴더에 모읍니다.
+실제 결과와 채택 여부는 [기존 실험 로그](../docs/filtering-experiment-log.md) 끝에 기록합니다.
+
+2026-10-10 비교에서는 3에폭 체크포인트의 FP32 ONNX가 두 점수 평균 145ms,
+통과·차단 67/74(90.5%)였다. 긴급도 점수 정확도 저하와 오통과 증가가 있어 앱 교체는 확정하지 않았다.
+INT8 62ms와 full-range UINT8 96ms는 모두 통과·차단 64/74(86.5%)로 내려가 선택하지 않았다.
+앱 연결을 검토할 후보는 해당 실행의 `model-fp32.onnx`와 `tokenizer/`이며,
+입력 직렬화는 실행 코드의 `input_text`와 일치해야 한다. C# 모듈과 전달 안내는
+[integration/csharp](../integration/csharp/README.md)에 있다. 실제 WPF 앱의 연결은 아직 수행하지 않았다.
+기록된 실행 폴더는 이미 존재하므로 재실행할 때 새 폴더를 지정한다.
+
+같은 자료로 small·large·mmBERT-small도 비교했다. 통과·차단은 small 65/74·large 61/74·mmBERT 65/74이며 CPU 평균은 각각 74·506·82ms다. 현재 base 67/74·145ms를 기준 후보로 유지한다.
+보강 후보 10건은 `outputs/v8_encoder_boundary_review_01/review.md`에서 검수하며 현재 학습 자료에는 합치지 않았다.
+
+
 ## 폴더 구조
 
 | 폴더 | 역할 |

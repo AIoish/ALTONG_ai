@@ -15,6 +15,75 @@ requires_local_artifacts = unittest.skipUnless(
 
 
 class DigitScoreTests(unittest.TestCase):
+    def test_encoder_urgency_ignores_window_changes_and_variant_ids(self):
+        import copy
+        import json
+        from filtering_training.modeling.encoder_score_experiment import input_text
+        original = {'notification': {'id': 'notice_current', 'body': '작업실 가스 누출, 즉시 대피'},
+                    'context': {'active_process': 'code.exe', 'window_title': 'review.md',
+                                'recent_windows': [{'app_name': 'chrome.exe', 'window_title': 'Instagram'}]}}
+        changed = copy.deepcopy(original)
+        changed['notification']['id'] = 'notice_empty'
+        changed['context']['window_title'] = ''
+        changed['context']['recent_windows'] = []
+        self.assertEqual(input_text(original, 'urgency'), input_text(changed, 'urgency'))
+        self.assertNotEqual(input_text(original, 'relevance'), input_text(changed, 'relevance'))
+        self.assertNotIn('id', json.loads(input_text(original, 'relevance'))['notification'])
+        self.assertEqual(original['context']['window_title'], 'review.md')
+
+    def test_encoder_metrics_distinguish_threshold_error_from_within_one(self):
+        from types import SimpleNamespace
+        from filtering_training.modeling.encoder_score_experiment import score
+        samples = [SimpleNamespace(notification=SimpleNamespace(id=f'case_{i}'),
+                                  label=SimpleNamespace(urgency_score=i, relevance_score=6-i)) for i in range(1, 6)]
+        predictions = [{'urgency_score': i, 'relevance_score': 6-i} for i in range(1, 6)]
+        perfect = score(samples, predictions)
+        self.assertEqual(perfect['urgency_score']['macro_f1'], 1)
+        self.assertEqual(perfect['relevance_score']['macro_f1'], 1)
+        predictions[3]['urgency_score'] = 3
+        actual = score(samples, predictions)
+        self.assertEqual(actual['urgency_score']['within_one_accuracy'], 1)
+        self.assertEqual(actual['policy_correct'], 4)
+        self.assertEqual(actual['urgent_false_blocks'], 1)
+
+
+    def test_encoder_native_prepared_rejects_changed_hash_and_urgency_context(self):
+        import json
+        import tempfile
+        from filtering_training.common import encoder_data as experiment
+        from filtering_training.preparation.prepare_score_experiment import write_json, write_lines, digest
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            manifest = {"format": "native_laya_choice_v2", "prompt_version": "v2",
+                        "protected_hashes": {"filtering_training/outputs/models/laya-multilingual/model.safetensors": "archived"},
+                        "files": {}, "counts": {}}
+            for task in ("urgency", "relevance"):
+                (root / task).mkdir()
+                state = {"notification": {"body": "example"}}
+                if task == "relevance":
+                    state["context"] = {"window_title": "example task"}
+                row = {"state": state, "questions": {task: experiment.prepared_question(task)},
+                       "expected": {task: "2"}}
+                path = root / task / "train.jsonl"
+                write_lines(path, [row])
+                manifest["files"][task + "/train.jsonl"] = {"count": 1, "sha256": digest(path)}
+                manifest["counts"][task] = {"total": 1}
+            write_json(root / "manifest.json", manifest)
+            sources, _ = experiment.load_native_prepared(root)
+            path = root / "urgency/train.jsonl"
+            row = sources["urgency"][0]
+            row["expected"]["urgency"] = "3"
+            write_lines(path, [row])
+            with self.assertRaisesRegex(ValueError, "protected input changed"):
+                experiment.load_native_prepared(root)
+            row["state"]["context"] = {"window_title": "must not enter urgency"}
+            write_lines(path, [row])
+            manifest["files"]["urgency/train.jsonl"]["sha256"] = digest(path)
+            write_json(root / "manifest.json", manifest)
+            with self.assertRaisesRegex(ValueError, "context separation"):
+                experiment.load_native_prepared(root)
+
+
     def test_epoch_schedule_counts_optimizer_steps_and_partial_tail(self):
         from filtering_training.modeling.digit_score_experiment import training_schedule
         for count,steps,warmup in ((4936,617,31),(11771,1472,74)):
