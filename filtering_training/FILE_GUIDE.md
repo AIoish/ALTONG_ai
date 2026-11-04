@@ -1,5 +1,11 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-04 갱신: Encoder 공통코드는 `common/artifact_io.py`, `encoder_input.py`,
+> `validation_data.py`, `score_metrics.py`, `encoder_data.py`로 분리했다.
+> 기존 학습·추론·대조 도구는 `legacy/modeling/`, Qwen 전용 헬퍼는 `legacy/common/`으로 이동했다.
+> 아래 표의 과거 경로는 호환 import로만 유지한다. 현재 위치와 v13 학습은
+> [최신 안내](../docs/filtering-windows-only-2026-11-04.md)를 참고한다.
+
 ## 현재 사용 또는 공통 기반
 
 | 파일 | 역할 |
