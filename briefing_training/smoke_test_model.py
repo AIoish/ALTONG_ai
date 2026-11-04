@@ -51,6 +51,13 @@ def load_model(
     *,
     adapter_path: str | Path | None = None,
 ):
+    if adapter_path is not None:
+        config_path = Path(adapter_path) / "adapter_config.json"
+        if not config_path.is_file():
+            raise ValueError(f"adapter_config.json not found: {config_path}")
+        base = json.loads(config_path.read_text(encoding="utf-8")).get("base_model_name_or_path")
+        if base != model_name:
+            raise ValueError(f"adapter base model {base!r} does not match requested model {model_name!r}")
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 

@@ -142,6 +142,7 @@ def train(
     learning_rate: float,
     max_length: int,
     resume_from_checkpoint: Path | None = None,
+    model_name: str = MODEL_NAME,
 ) -> None:
     import torch
     from peft import LoraConfig
@@ -167,7 +168,7 @@ def train(
         task_type="CAUSAL_LM",
         target_modules="all-linear",
     )
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -204,7 +205,7 @@ def train(
         seed=42,
     )
     trainer = SFTTrainer(
-        model=MODEL_NAME,
+        model=model_name,
         args=training_config,
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
@@ -221,7 +222,7 @@ def train(
         def on_save(self, args, state, control, **kwargs):
             checkpoint_dir = Path(args.output_dir) / f"checkpoint-{state.global_step}"
             (checkpoint_dir / "briefing_task.json").write_text(
-                json.dumps({"task": task}), encoding="utf-8",
+                json.dumps({"task": task, "model_name": model_name}), encoding="utf-8",
             )
 
     trainer.add_callback(ContractCallback())
@@ -233,7 +234,7 @@ def train(
     trainer.save_model(str(output_directory))
     tokenizer.save_pretrained(output_directory)
     (output_directory / "briefing_task.json").write_text(
-        json.dumps({"task": task}), encoding="utf-8",
+        json.dumps({"task": task, "model_name": model_name}), encoding="utf-8",
     )
     trainer.save_metrics("train", result.metrics)
     evaluation_metrics = trainer.evaluate()
@@ -244,6 +245,7 @@ def train(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", choices=("briefing", "summary"), default="briefing")
+    parser.add_argument("--model-name", default=MODEL_NAME, help="Qwen3 base model identifier")
     parser.add_argument("--train-path", type=Path)
     parser.add_argument(
         "--validation-path", type=Path
@@ -282,7 +284,15 @@ def main() -> None:
         state_file = args.resume_from_checkpoint / "briefing_task.json"
         if not state_file.is_file() or json.loads(state_file.read_text(encoding="utf-8")).get("task") != "briefing":
             raise ValueError("cannot resume a v5/v6 summary-only checkpoint for the new briefing task")
-
+    if args.resume_from_checkpoint:
+        adapter_config = args.resume_from_checkpoint / "adapter_config.json"
+        if not adapter_config.is_file():
+            raise ValueError("resume checkpoint is missing adapter_config.json")
+        checkpoint_base = json.loads(adapter_config.read_text(encoding="utf-8")).get("base_model_name_or_path")
+        if checkpoint_base != args.model_name:
+            raise ValueError(f"checkpoint base {checkpoint_base!r} does not match --model-name {args.model_name!r}")
+    elif args.output_dir.exists() and any(args.output_dir.iterdir()):
+        raise ValueError("output directory is not empty; choose a new directory or resume a checkpoint")
     resume_from_checkpoint = validate_resume_checkpoint(
         args.resume_from_checkpoint
     )
@@ -297,6 +307,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         max_length=args.max_length,
         resume_from_checkpoint=resume_from_checkpoint,
+        model_name=args.model_name,
     )
 
 

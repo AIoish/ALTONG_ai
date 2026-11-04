@@ -1,6 +1,9 @@
 import unittest
+import json
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from briefing_training.smoke_test_model import load_model
 
 from briefing_training.prepare_dataset import SCENARIOS, build_record
 from briefing_training.train_lora import (
@@ -13,6 +16,14 @@ from briefing_training.train_lora import (
 
 
 class TrainQwenLoraTests(unittest.TestCase):
+    def test_incompatible_adapter_is_rejected_before_loading_model(self):
+        with TemporaryDirectory() as temporary:
+            adapter = Path(temporary)
+            (adapter / "adapter_config.json").write_text(
+                json.dumps({"base_model_name_or_path": "Qwen/Qwen3-0.6B"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not match requested model"):
+                load_model("Qwen/Qwen3-1.7B", adapter_path=adapter)
+
     def test_prompt_completion_trains_only_on_assistant_json(self) -> None:
         record = build_record(SCENARIOS[0], "train", 0)
         example = to_prompt_completion(record)

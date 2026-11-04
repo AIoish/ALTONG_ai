@@ -1,5 +1,55 @@
 # 브리핑 모델 실행·학습·평가 안내
 
+## Qwen3-1.7B 비교 실험
+
+기존 v8 0.6B와 별도로 실행합니다. 1.7B 기본 모델에는 v8 어댑터나 체크포인트를 사용할 수 없습니다.
+첫 실행에는 모델 다운로드가 필요합니다. 4GB VRAM에서 추론·학습 가능 여부는 실제 확인해야 하며,
+메모리 부족 시 학습을 중단하고 더 큰 GPU 환경을 사용하세요. 양자화·CPU 오프로딩은 속도와 품질에 영향을 줄 수 있습니다.
+기본 모델 평가는 FP16으로 로드하므로 학습의 4비트 로딩과 메모리 요구량이 다릅니다.
+
+```powershell
+cd "C:\Users\akio7\OneDrive\바탕 화면\ALTONG_ai"
+$briefingPython = "C:\dev\ALTONG_ai_train_v5\.venv\Scripts\python.exe"
+
+# 기존 v8과 같은 평가 사례로 1.7B 기본 모델 확인
+& $briefingPython -m briefing_training.evaluate --task briefing --greedy `
+  --model-name "Qwen/Qwen3-1.7B" `
+  --cases briefing_training/data/category_briefing_v9/conversation_evaluation.jsonl `
+  --output outputs/qwen17b-base-conversation.json `
+  --review-output outputs/qwen17b-base-conversation-review.md
+
+# 데이터 형식만 확인하며 GPU 학습은 하지 않음
+& $briefingPython -m briefing_training.train_lora --task briefing `
+  --model-name "Qwen/Qwen3-1.7B" `
+  --train-path briefing_training/data/category_briefing_v9/train_cases.jsonl `
+  --validation-path briefing_training/data/category_briefing_v9/validation_cases.jsonl --validate-only
+
+# 새 폴더에서 1.7B를 새로 학습. 4GB GPU에서 메모리 부족 가능.
+& $briefingPython -m briefing_training.train_lora --task briefing `
+  --model-name "Qwen/Qwen3-1.7B" `
+  --train-path briefing_training/data/category_briefing_v9/train_cases.jsonl `
+  --validation-path briefing_training/data/category_briefing_v9/validation_cases.jsonl `
+  --output-dir "C:\dev\ALTONG_models\briefing-qwen3-1.7b-v9-local" `
+  --epochs 3 --batch-size 1 --gradient-accumulation-steps 16 `
+  --learning-rate 0.0001 --max-length 2048
+
+# 학습 완료 후 같은 평가
+& $briefingPython -m briefing_training.evaluate --task briefing --greedy `
+  --model-name "Qwen/Qwen3-1.7B" `
+  --cases briefing_training/data/category_briefing_v9/conversation_evaluation.jsonl `
+  --adapter-path "C:\dev\ALTONG_models\briefing-qwen3-1.7b-v9-local" `
+  --output outputs/qwen17b-v9-conversation.json `
+  --review-output outputs/qwen17b-v9-conversation-review.md
+```
+
+기존 비교 결과 `outputs/v8-corrected-conversation-review.md`와 각 입력·요약·누락 사실을 비교합니다.
+평가 점수는 원문 기반 카테고리 교정을 기본 적용하며 문장의 자연스러움과 부정 의미는 사람이 확인해야 합니다.
+8건은 소규모 합성 사례입니다. 실제 테스트 사례는 개인정보를 제거하고 별도 평가셋으로 분리하세요.
+학습 중 끊기면 저장이 완료된 1.7B checkpoint 경로를 `--resume-from-checkpoint`로 지정하고,
+위의 모델·데이터·학습 설정과 output-dir을 그대로 유지합니다. 존재하는 비어 있지 않은 폴더에 새 학습은 거부합니다.
+체크포인트 저장은 에포크 단위입니다. 완료 전에 중단하면 마지막 저장 이후 진행분은 돌아갑니다.
+이 기능은 Qwen3 계열 실험용이며 Gemma 등 다른 계열의 템플릿·LoRA 대상 모듈 호환은 검증하지 않았습니다.
+
 ## 현재 모델과 실행 환경
 
 v8은 통합 후보이며 기본 모델은 **Qwen/Qwen3-0.6B**입니다.
