@@ -1,13 +1,8 @@
--r ../requirements.txt
-
-pandas
-datasets
-trl
-peft
-accelerate
-bitsandbytes
+# Current Encoder training and validation. PyTorch is installed separately.
+# Updated: 2026-11-04 (Asia/Seoul). Historical Qwen extras: legacy/requirements.txt.
+pydantic
+transformers
 scikit-learn
-sentencepiece
 
 # Encoder CPU resource measurements.
 psutil

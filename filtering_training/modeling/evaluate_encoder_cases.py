@@ -12,9 +12,9 @@ import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
 
-from filtering_training.modeling.encoder_score_experiment import input_text
+from filtering_training.common.encoder_input import legacy_input_text as input_text
 from src.filtering.policy import should_pass, POLICY_VERSION
-from filtering_training.common.score_tasks import HistorySample
+from filtering_training.common.validation_data import HistorySample
 
 ROOT = Path(__file__).resolve().parents[2]
 TASKS = ('urgency', 'relevance')

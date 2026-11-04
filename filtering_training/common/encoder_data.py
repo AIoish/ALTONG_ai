@@ -4,7 +4,11 @@
 
 import json
 from pathlib import Path
-from filtering_training.preparation.prepare_score_experiment import digest
+from filtering_training.common.artifact_io import ROOT, digest, read
+from filtering_training.common.encoder_input import INPUT_SCHEMA, RECENT_WINDOWS_POLICY, input_text, windows_only_state
+
+FROZEN_PREPARED = ROOT / 'filtering_training/outputs/v7_relevance_ladder_01/prepared_laya_v2'
+DEFAULT_DATASET = ROOT / 'filtering_training/outputs/v13_previous_windows_relevance_01'
 
 # Retain the frozen source schema and descriptions without requiring its original model SDK.
 SCORE_INSTRUCTIONS = {
@@ -76,3 +80,79 @@ def load_native_prepared(folder):
         if digest(Path(path)) != expected:
             raise ValueError(f"native prepared protected input changed: {path}")
     return sources, hashes
+
+
+def load_windows_prepared(folder=DEFAULT_DATASET):
+    """Read app-aligned data with hashes, retained labels and serialized-input checks."""
+    folder = Path(folder).resolve()
+    manifest_file = folder / 'manifest.json'
+    manifest = read(manifest_file)
+    if manifest.get('removed_field') != 'recent_processes' or manifest.get('label_mapping_changed') is not False:
+        raise ValueError('expected windows-only relevance dataset')
+    if manifest.get('input_schema') != INPUT_SCHEMA or manifest.get('recent_windows_policy') != RECENT_WINDOWS_POLICY:
+        raise ValueError('expected app-aligned previous-windows dataset; migrate v12 before training')
+    sources, hashes = load_native_prepared(FROZEN_PREPARED)
+    hashes[str(manifest_file)] = digest(manifest_file)
+    files = {}
+    expected_files = ('relevance/train.jsonl', 'mapped-training/initial.jsonl', 'mapped-training/safety.jsonl')
+    for name in expected_files:
+        path = folder / name
+        record = manifest['files'][name]
+        if digest(path) != record['sha256']:
+            raise ValueError(f'windows-only dataset hash changed: {name}')
+        rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+        if len(rows) != record['rows']:
+            raise ValueError(f'windows-only dataset row count changed: {name}')
+        hashes[str(path)] = record['sha256']
+        files[name] = rows
+    relevance = files['relevance/train.jsonl']
+    expected = [dict(row, state=windows_only_state(row['state'])) for row in sources['relevance']]
+    if relevance != expected:
+        raise ValueError('windows-only relevance must preserve original order and labels with app-normalized windows')
+    sources['relevance'] = relevance
+    stages = {}
+    mapping = {1: 1, 2: 2, 3: 2, 4: 3, 5: 3}
+    for stage in ('initial', 'safety'):
+        rows = files[f'mapped-training/{stage}.jsonl']
+        result = []
+        for row in rows:
+            task = row['task']
+            original = row['original_score']
+            if task not in ('urgency', 'relevance') or type(original) is not int or original not in range(1, 6):
+                raise ValueError('invalid mapped task or original score')
+            if type(row['score']) is not int or row['score'] != (mapping[original] if task == 'relevance' else original):
+                raise ValueError('mapped score changed')
+            state = row['state']
+            if task == 'relevance' and 'recent_processes' in state['context']:
+                raise ValueError('recent_processes must be absent from current relevance state')
+            if task == 'relevance' and state != windows_only_state(state):
+                raise ValueError('relevance state must use app-normalized previous windows')
+            if task == 'urgency' and set(state) != {'notification'}:
+                raise ValueError('urgency context separation changed')
+            if row['input_text'] != input_text(state, task):
+                raise ValueError('mapped input_text does not match windows-only input builder')
+            result.append(({'state': state, 'expected': {task: str(original)}}, task))
+        stages[stage] = result
+    return sources, hashes, stages
+
+
+def load_evaluation_inputs(folder, expected):
+    """Check prepared evaluation snapshots against approved sources after the same transform."""
+    folder = Path(folder).resolve()
+    manifest_path = folder / 'manifest.json'
+    manifest = read(manifest_path)
+    if manifest.get('input_schema') != INPUT_SCHEMA or manifest.get('recent_windows_policy') != RECENT_WINDOWS_POLICY:
+        raise ValueError('expected app-aligned evaluation input schema')
+    result, protected = {}, {str(manifest_path): digest(manifest_path)}
+    for name, original_rows in expected.items():
+        filename = f'evaluation/{name}.jsonl'
+        path = folder / filename
+        info = manifest['files'][filename]
+        if digest(path) != info['sha256']:
+            raise ValueError(f'evaluation snapshot hash changed: {name}')
+        rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+        if len(rows) != info['rows'] or rows != original_rows:
+            raise ValueError(f'evaluation snapshots must preserve approved labels, IDs and order: {name}')
+        protected[str(path)] = info['sha256']
+        result[name] = rows
+    return result, protected

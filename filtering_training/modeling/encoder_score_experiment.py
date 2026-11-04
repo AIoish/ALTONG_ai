@@ -14,56 +14,20 @@ import sys
 import threading
 import time
 
-ROOT = Path(__file__).resolve().parents[2]
+from filtering_training.common.artifact_io import ROOT, created_date, digest, read, write
+from filtering_training.common.encoder_data import DEFAULT_DATASET, FROZEN_PREPARED, load_windows_prepared
+from filtering_training.common.encoder_input import INPUT_SCHEMA, input_text, encode_checked, input_schema_for_run
+from filtering_training.common.validation_data import validation
+from filtering_training.common.score_metrics import score_metrics
+
 BASE = ROOT / 'filtering_training/outputs/models/klue-roberta-base'
-PREPARED = ROOT / 'filtering_training/outputs/v7_relevance_ladder_01/prepared_laya_v2'
+# Kept only for archived experiments importing this name; new train() reads the app-aligned DEFAULT_DATASET.
+PREPARED = FROZEN_PREPARED
 REVISION = '02f94ba5e3fcb7e2a58a390b8639b0fac974a8da'
 TASKS = ('urgency', 'relevance')
 
 
-def read(path):
-    return json.loads(Path(path).read_text(encoding='utf-8'))
-
-
-def write(path, value):
-    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-
-
-def digest(path):
-    h = hashlib.sha256()
-    with Path(path).open('rb') as f:
-        for block in iter(lambda: f.read(1048576), b''):
-            h.update(block)
-    return h.hexdigest()
-
-
-def input_text(state, task):
-    """Only observed fields; urgency cannot see any work context or variant id."""
-    if task not in TASKS:
-        raise ValueError('unknown task')
-    notification = {k: v for k, v in state['notification'].items() if k != 'id'}
-    value = {'notification': notification}
-    if task == 'relevance':
-        context = state['context']
-        value['current_window'] = {k: context.get(k, '') for k in ('active_process', 'window_title')}
-        value['recent_windows'] = [{k: w.get(k, '') for k in ('app_name', 'window_title')}
-                                   for w in context.get('recent_windows', [])]
-        value['recent_processes'] = context.get('recent_processes', [])
-    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
-
-
-def validation():
-    from filtering_training.modeling.digit_score_experiment import load_validation_for_evaluation, VALIDATION_POOL
-    from filtering_training.common.digit_scores import replace_prompt
-    from filtering_training.common.score_tasks import messages
-    samples, groups, _ = load_validation_for_evaluation(VALIDATION_POOL)
-    texts = [[input_text(json.loads(replace_prompt(messages(s, task), task)[1]['content']), task) for task in TASKS]
-             for s in samples]
-    return samples, groups, texts
-
-
 def score(samples, predictions):
-    from filtering_training.common.score_tasks import score_metrics
     from sklearn.metrics import confusion_matrix, f1_score
     metrics = score_metrics(samples, predictions)
     for task in TASKS:
@@ -104,27 +68,17 @@ def build_model(config=None, base=BASE, attention="eager"):
     return ScoreEncoder()
 
 
-def encode_checked(tok, texts):
-    encoded = tok(texts, truncation=False, padding=False, return_token_type_ids=False)
-    lengths = [len(ids) for ids in encoded['input_ids']]
-    if max(lengths, default=0) > 512:
-        raise ValueError(f'input exceeds 512; no silent truncation: {max(lengths)}')
-    return [{'input_ids': ids, 'attention_mask': mask}
-            for ids, mask in zip(encoded['input_ids'], encoded['attention_mask'])], lengths
-
-
 def train(run, base=BASE, micro_batch=4, attention="eager", fused_adam=False, release_cache=False):
     import numpy as np
     import torch
     from transformers import AutoTokenizer, get_linear_schedule_with_warmup
-    from filtering_training.common.encoder_data import load_native_prepared
     if run.exists():
         raise ValueError('preserve existing run; choose fresh directory')
     random.seed(42)
     np.random.seed(42)
     torch.manual_seed(42)
     torch.set_num_threads(4)
-    sources, protected = load_native_prepared(PREPARED.relative_to(ROOT))
+    sources, protected, _ = load_windows_prepared(DEFAULT_DATASET)
     samples, groups, texts = validation()
     tok = AutoTokenizer.from_pretrained(str(base), local_files_only=True)
     records, lengths = [], []
@@ -144,7 +98,7 @@ def train(run, base=BASE, micro_batch=4, attention="eager", fused_adam=False, re
     weights = [len(records) / (2 * n) for n in counts]
     run.mkdir(parents=True)
     cfg = {'purpose': 'shared Korean encoder, two separated inputs and five-class heads; CPU deployment comparison',
-           'created_date': '2026-10-10', 'status': 'training', 'model': read(base / 'manifest.json').get('model', 'klue/roberta-base'),
+           'created_date': created_date(), 'input_schema': INPUT_SCHEMA, 'dataset_dir': str(DEFAULT_DATASET), 'status': 'training', 'model': read(base / 'manifest.json').get('model', 'klue/roberta-base'),
            'model_revision': read(base / 'manifest.json').get('revision', REVISION), 'train_counts': dict(zip(TASKS, counts)), 'seed': 42,
            'epochs_max': 3, 'micro_batch': micro_batch, 'accumulation': 16 // micro_batch, 'effective_batch': 16,
            'encoder_lr': 2e-5, 'head_lr': 1e-4, 'weight_decay': .01, 'warmup_ratio': .1,
@@ -275,7 +229,7 @@ def export(run, fp32_only=False):
                          op_types_to_quantize=['MatMul'], per_channel=True, reduce_range=True)
         onnx.checker.check_model(str(run / 'model-int8.onnx'))
     write(run / 'export.json', {'purpose': 'CPU ONNX exports of selected shared encoder',
-          'created_date': '2026-10-10', 'source_checkpoint_sha256': cfg['checkpoint_sha256'],
+          'created_date': created_date(), 'input_schema': input_schema_for_run(cfg), 'source_checkpoint_sha256': cfg['checkpoint_sha256'],
           'quantization': None if fp32_only else 'dynamic per-channel signed INT8 MatMul weights; reduced range for AVX2',
           'onnx': onnx.__version__, 'onnxruntime': __import__('onnxruntime').__version__,
           'files': {name: {'bytes': (run / name).stat().st_size, 'sha256': digest(run / name)}
@@ -289,7 +243,7 @@ def cpu_worker(run, variant):
     import onnxruntime as ort
     from tokenizers import Tokenizer
     tok = Tokenizer.from_file(str(run / 'tokenizer/tokenizer.json'))
-    samples, _, texts = validation()
+    samples, _, texts = validation(schema=input_schema_for_run(read(run / 'run_config.json')))
     tokenized = tok.encode_batch([t for pair in texts for t in pair])
     if max(len(e.ids) for e in tokenized) > 512:
         raise ValueError('CPU input exceeds 512 tokens')
@@ -363,7 +317,7 @@ def cpu_worker(run, variant):
     parity_mismatches = [samples[i].notification.id for i, row in enumerate(selected_predictions)
                          if row['prediction'] != preds[i]]
     report = {'purpose': '100 notification CPU benchmark, two separated score inputs per notification',
-              'created_date': '2026-10-10', 'variant': variant, 'threads': 4, 'logical_cpus': psutil.cpu_count(),
+              'created_date': created_date(), 'input_schema': input_schema_for_run(training_config), 'variant': variant, 'threads': 4, 'logical_cpus': psutil.cpu_count(),
               'providers': session.get_providers(), 'model_sha256': digest(run / f'model-{variant}.onnx'),
               'executed_code_sha256': digest(__file__),
               'metrics': metrics, 'mean_seconds': statistics.mean(seconds), 'p50_seconds': float(np.percentile(seconds, 50)),

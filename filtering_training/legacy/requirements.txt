@@ -1,0 +1,10 @@
+# 용도: 과거 Qwen SFT·LoRA·숫자 분류 실험의 추가 의존성.
+# 생성일: 2026-11-04
+-r ../requirements.txt
+pandas
+datasets
+trl
+peft
+accelerate
+bitsandbytes
+sentencepiece

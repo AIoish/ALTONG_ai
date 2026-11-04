@@ -4,10 +4,9 @@
 
 import hashlib
 import json
-from collections import defaultdict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from src.filtering.schema import CurrentContext, FilteringSample
+from filtering_training.common.validation_data import RecentWindow, HistoryContext, HistorySample, load_score_samples
+from filtering_training.common.score_metrics import score_metrics
 
 from src.filtering.policy import should_pass
 from src.filtering.prompt import build_messages, parse_model_output, SYSTEM_PROMPT
@@ -16,45 +15,6 @@ from src.filtering.prompt import build_messages, parse_model_output, SYSTEM_PROM
 TASKS = ("full", "scores", "urgency", "relevance")
 
 
-class RecentWindow(BaseModel):
-    """Offline history input; no timestamps are assumed to be available."""
-    model_config = ConfigDict(extra="forbid")
-    app_name: str = Field(min_length=1, pattern=r"\S")
-    window_title: str
-
-
-class HistoryContext(CurrentContext):
-    recent_windows: list[RecentWindow] = Field(default_factory=list, max_length=3)
-
-    @model_validator(mode="after")
-    def consistent_recent_apps(self):
-        if self.recent_processes != [window.app_name for window in self.recent_windows]:
-            raise ValueError("recent app names must match the supplied windows in order")
-        return self
-
-
-class HistorySample(FilteringSample):
-    """Offline schema extension; existing app schema remains unchanged."""
-    context: HistoryContext
-
-
-def load_score_samples(path):
-    """Preserve optional history fields instead of silently dropping them."""
-    samples, seen = [], set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        value = json.loads(line)
-        schema = HistorySample if "recent_windows" in value.get("context", {}) else FilteringSample
-        sample = schema.model_validate(value)
-        if sample.notification.id in seen:
-            raise ValueError("duplicate notification id")
-        parse_model_output(json.dumps(sample.label.model_dump(), ensure_ascii=False))
-        seen.add(sample.notification.id)
-        samples.append(sample)
-    if not samples:
-        raise ValueError("dataset contains no samples")
-    return samples
 FIELDS = {"scores": ("urgency_score", "relevance_score"),
           "urgency": ("urgency_score",), "relevance": ("relevance_score",)}
 URGENCY_RULE = (
@@ -164,48 +124,3 @@ def unique_urgency_samples(samples):
             raise ValueError("context variants disagree on urgency or category")
         groups.setdefault(key, sample)
     return list(groups.values())
-
-
-def score_metrics(samples, predictions):
-    if not samples or len(samples) != len(predictions):
-        raise ValueError("predictions must cover all samples")
-    for prediction in predictions:
-        if prediction is not None:
-            parse_scores(json.dumps(prediction), "scores")
-    valid = [(s, p) for s, p in zip(samples, predictions) if p is not None]
-    urgent = blocked = failed = invalid_urgent = false_pass = correct = gold_block = 0
-    groups = defaultdict(list)
-    by_context = defaultdict(lambda: {"urgent": 0, "urgent_failures": 0})
-    for s, p in zip(samples, predictions):
-        expected = should_pass(s.label.urgency_score, s.label.relevance_score)
-        decision = should_pass(**p) if p is not None else None
-        correct += decision == expected
-        gold_block += not expected
-        false_pass += not expected and decision is True
-        is_urgent = s.label.urgency_score >= 4
-        urgent += is_urgent
-        blocked += is_urgent and decision is False
-        failed += is_urgent and decision is not True
-        invalid_urgent += is_urgent and p is None
-        role = s.notification.id.rsplit("_", 1)[-1]
-        by_context[role]["urgent"] += is_urgent
-        by_context[role]["urgent_failures"] += is_urgent and decision is not True
-        groups[s.notification.id.rsplit("_", 1)[0]].append(p)
-    invariance = {}
-    for group, items in groups.items():
-        values = [p["urgency_score"] for p in items if p is not None]
-        invariance[group] = {"count": len(items), "valid": len(values),
-                             "range": max(values)-min(values) if len(values) == len(items) else None}
-    metrics = {"count": len(samples), "valid_outputs": len(valid),
-               "policy_correct": correct, "policy_accuracy": correct/len(samples),
-               "urgent_count": urgent, "urgent_false_blocks": blocked,
-               "urgent_invalid": invalid_urgent, "urgent_failures": failed,
-               "gold_block_count": gold_block, "false_passes": false_pass,
-               "by_context": dict(by_context), "urgency_invariance": invariance,
-               "fully_invariant_groups": sum(x["count"] > 1 and x["range"] == 0 for x in invariance.values())}
-    for field in FIELDS["scores"]:
-        errors = [abs(getattr(s.label, field)-p[field]) for s, p in valid]
-        metrics[field] = {"exact_accuracy": sum(e == 0 for e in errors)/len(samples),
-                          "within_one_accuracy": sum(e <= 1 for e in errors)/len(samples),
-                          "mae_on_valid": sum(errors)/len(errors) if errors else None}
-    return metrics

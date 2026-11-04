@@ -217,7 +217,7 @@ class ScoreSeparationTests(unittest.TestCase):
                                   "metrics":score_metrics([item],[prediction]),"performance":{}})
                 reports.append(path)
             self.assertEqual(set(compare(root,reports,root/"summary.json")["variants"]), {"A","B","C"})
-            bad_rows = [json.loads(line) for line in reports[1].with_suffix(".predictions.jsonl").read_text().splitlines()]
+            bad_rows = [json.loads(line) for line in reports[1].with_suffix(".predictions.jsonl").read_text(encoding="utf-8").splitlines()]
             bad_rows[0]["prediction"] = {"urgency_score":1,"relevance_score":1}
             write_lines(reports[1].with_suffix(".predictions.jsonl"),bad_rows)
             report=json.loads(reports[1].read_text())
