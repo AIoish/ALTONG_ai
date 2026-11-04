@@ -14,7 +14,12 @@ import numpy as np
 import torch
 from transformers import AutoConfig, AutoTokenizer, get_linear_schedule_with_warmup
 
-from filtering_training.modeling.encoder_score_experiment import build_model, input_text, encode_checked, validation, score
+from functools import partial
+from filtering_training.modeling.encoder_score_experiment import build_model, score
+from filtering_training.common.encoder_input import LEGACY_INPUT_SCHEMA, legacy_input_text as input_text, encode_checked
+from filtering_training.common.validation_data import validation as current_validation
+
+validation = partial(current_validation, schema=LEGACY_INPUT_SCHEMA)
 from src.filtering.policy import should_pass
 
 ROOT = Path(__file__).resolve().parents[2]

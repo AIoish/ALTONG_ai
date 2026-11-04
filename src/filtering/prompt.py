@@ -4,10 +4,8 @@ import json
 
 from pydantic import ValidationError
 
-from src.filtering.schema import CurrentContext, FilterLabel, RawNotification
+from src.filtering.schema import CATEGORIES, CurrentContext, FilterLabel, RawNotification
 
-
-CATEGORIES = ("긴급 업무", "일반 업무", "일정/회의", "시스템/보안", "개인 중요", "개인 일반", "광고/홍보", "기타")
 
 SYSTEM_PROMPT = """알림과 현재 작업 맥락을 보고 JSON 객체 하나만 출력하세요.
 필드는 urgency_score, relevance_score, category, ai_summary_reason 네 개입니다.

@@ -14,6 +14,6 @@ _root = TRAINING_ROOT
 _compatibility_folders = (
     "generation", "preparation", "quality", "modeling",
     "legacy/generation", "legacy/preparation", "legacy/review",
-    "legacy/quality", "legacy/external", "legacy/diagnostics",
+    "legacy/quality", "legacy/external", "legacy/diagnostics", "legacy/modeling",
 )
 __path__.extend(str(_root / folder) for folder in _compatibility_folders)

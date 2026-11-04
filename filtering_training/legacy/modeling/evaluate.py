@@ -12,6 +12,7 @@ from pathlib import Path
 from sklearn.metrics import f1_score
 
 from filtering_training.common.dataset import load_samples
+from filtering_training.common.validation_data import load_split_samples
 from filtering_training.preparation.prepare_dataset import DATASET_PATH, OUTPUT_DIR
 from src.filtering.policy import POLICY_VERSION, should_pass
 from src.filtering.prompt import SYSTEM_PROMPT, build_messages, parse_model_output
@@ -22,21 +23,6 @@ MODEL_NAME = "Qwen/Qwen3-1.7B"
 EVALUATION_DIR = OUTPUTS_ROOT / "runs" / "evaluation"
 MAX_NEW_TOKENS = 192
 
-
-def load_split_samples(dataset: Path, prepared_dir: Path, split: str) -> list[FilteringSample]:
-    dataset = resolve_existing_path(dataset)
-    prepared_dir = resolve_existing_path(prepared_dir)
-    manifest = json.loads((prepared_dir / "manifest.json").read_text(encoding="utf-8"))
-    if hashlib.sha256(dataset.read_bytes()).hexdigest() != manifest["source_sha256"]:
-        raise ValueError("prepared split does not match the current dataset")
-    ids = manifest["splits"][split]["notification_ids"]
-    samples_by_id = {sample.notification.id: sample for sample in load_samples(dataset)}
-    if len(ids) != len(set(ids)):
-        raise ValueError("prepared split contains duplicate IDs")
-    try:
-        return [samples_by_id[notification_id] for notification_id in ids]
-    except KeyError as error:
-        raise ValueError("prepared split references an unknown sample") from error
 
 
 def score_predictions(

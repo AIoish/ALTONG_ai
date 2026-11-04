@@ -3,6 +3,9 @@ from datetime import datetime, timedelta
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
+CATEGORIES = ("긴급 업무", "일반 업무", "일정/회의", "시스템/보안", "개인 중요", "개인 일반", "광고/홍보", "기타")
+
+
 def validate_utc_z_datetime(value: object) -> object:
     if isinstance(value, str):
         if not value.endswith("Z"):

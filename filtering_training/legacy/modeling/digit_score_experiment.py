@@ -16,11 +16,11 @@ from filtering_training.common.score_loss import balanced_indices
 from filtering_training.common.score_tasks import messages, parse_scores, score_metrics, load_score_samples, unique_urgency_samples
 from filtering_training.modeling.evaluate import load_split_samples
 from filtering_training.preparation.prepare_score_experiment import digest, write_json, write_lines
+from filtering_training.common.validation_data import load_validation_for_evaluation, VALIDATION_POOL
 
 MODEL = "Qwen/Qwen3-0.6B"
 SOURCE = Path("filtering_training/outputs/v3_reviewed_01")
 PREPARED = Path("filtering_training/outputs/v3_score_separation_01/prepared")
-VALIDATION_POOL = Path("filtering_training/outputs/v5_validation_pool_01")
 INPUT_POLICY = "no notification variant id in either score input; urgency has no context"
 
 
@@ -302,39 +302,6 @@ def train(output, task, mode, smoke, prepared_root=PREPARED, max_steps=None, thr
                                     "lr_scheduler_type":"linear","weight_decay":0.0,"max_grad_norm":1.0})
     write_json(output/"run_config.json",config)
 
-
-def load_validation_for_evaluation(validation_pool=None):
-    """Keep legacy comparison and add only previously approved validation rows."""
-    legacy=load_split_samples(SOURCE/"dataset.jsonl",SOURCE/"prepared","validation")
-    groups={"legacy_24":[s.notification.id for s in legacy]}
-    if validation_pool is None:
-        return legacy,groups,None
-    manifest=json.loads((validation_pool/"manifest.json").read_text(encoding="utf-8"))
-    subset=manifest.get("evaluation_set",{})
-    if manifest.get("intended_split")!="validation" or not subset or subset.get("training_used"):
-        raise ValueError("approved validation subset required")
-    if digest(validation_pool/subset["dataset_file"])!=subset["dataset_sha256"] or digest(validation_pool/"approval.json")!=subset["preview_approval_sha256"]:
-        raise ValueError("approved validation subset changed")
-    approved={}
-    for source in subset["seed_sources"]:
-        folder=Path(source["folder"])
-        if digest(folder/"dataset.jsonl")!=source["dataset_sha256"] or digest(folder/"approval.json")!=source["approval_sha256"]:
-            raise ValueError("validation approval evidence changed")
-        for sample in load_score_samples(folder/"dataset.jsonl"):
-            approved[sample.notification.id]=sample.model_dump(mode="json")
-    preview=json.loads((validation_pool/"approval.json").read_text(encoding="utf-8"))
-    for item in preview["approved_cases"]:
-        approved[item["notification"]["id"]]=item
-    extra=load_score_samples(validation_pool/subset["dataset_file"])
-    if {s.notification.id for s in extra}!=set(subset["approved_ids"]) or {s.notification.id for s in extra}!=set(approved):
-        raise ValueError("unreviewed validation rows in evaluation subset")
-    for sample in extra:
-        if sample.model_dump(mode="json")!=approved[sample.notification.id]:
-            raise ValueError("validation label differs from approval")
-    if set(groups["legacy_24"]) & set(approved):
-        raise ValueError("duplicate evaluation ids")
-    groups["approved_expansion"]=[s.notification.id for s in extra]
-    return legacy+extra,groups,subset
 
 
 def evaluate(output, runs, prepared_root=PREPARED, urgency_run=None, relevance_run=None, validation_pool=VALIDATION_POOL):

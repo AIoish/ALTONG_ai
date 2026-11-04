@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
-from filtering_training.modeling.encoder_score_experiment import input_text
+from filtering_training.common.encoder_input import legacy_input_text as input_text
 
 ROOT=Path(__file__).resolve().parents[2]
 def main():
