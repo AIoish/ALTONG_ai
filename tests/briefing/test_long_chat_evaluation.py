@@ -8,9 +8,19 @@ from unittest.mock import patch
 
 from briefing_training import evaluate
 from briefing_training.smoke_test_model import load_cases
+from briefing_training.train_lora import load_records, validate_split_separation
 
 
 class LongChatEvaluationTests(unittest.TestCase):
+    def test_independent_chat_cases_do_not_duplicate_training_inputs(self):
+        root = Path("briefing_training/data/category_briefing_v9")
+        cases = load_cases(root / "independent_chat_evaluation.jsonl")
+        evaluate.validate_evaluation_cases(cases)
+        self.assertEqual(len(cases), 8)
+        for split in ("train", "validation"):
+            records = load_records(root / f"{split}_cases.jsonl", expected_split=split)
+            validate_split_separation(records, cases)
+
     def test_rejects_missing_file_naming_and_outdated_cancellation(self):
         path = Path("briefing_training/data/category_briefing_v9/long_chat_evaluation_v2.jsonl")
         cases = {case["case_id"]: case for case in load_cases(path)}

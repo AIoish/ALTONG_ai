@@ -94,6 +94,19 @@ def validate_resume_checkpoint(path: Path | None) -> Path | None:
     return checkpoint
 
 
+def validate_initial_adapter(path: Path, model_name: str, output_directory: Path) -> Path:
+    adapter = path.expanduser().resolve()
+    if not (adapter / "adapter_config.json").is_file() or not (adapter / "adapter_model.safetensors").is_file():
+        raise ValueError("initial adapter must contain adapter_config.json and adapter_model.safetensors")
+    config = json.loads((adapter / "adapter_config.json").read_text(encoding="utf-8"))
+    if config.get("base_model_name_or_path") != model_name:
+        raise ValueError("initial adapter base model does not match --model-name")
+    output = output_directory.expanduser().resolve()
+    if output == adapter or adapter in output.parents or output in adapter.parents:
+        raise ValueError("initial adapter and output directory must be separate")
+    return adapter
+
+
 def to_prompt_completion(record: Mapping[str, Any]) -> dict[str, Any]:
     joint = "primary_category" in record.get("target", {})
     messages = category_training_messages(record) if joint else training_messages(record)
@@ -143,10 +156,11 @@ def train(
     max_length: int,
     resume_from_checkpoint: Path | None = None,
     model_name: str = MODEL_NAME,
+    initial_adapter: Path | None = None,
 ) -> None:
     import torch
-    from peft import LoraConfig
-    from transformers import AutoTokenizer, BitsAndBytesConfig
+    from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from trl import SFTConfig, SFTTrainer
 
     if not torch.cuda.is_available():
@@ -204,14 +218,23 @@ def train(
         report_to="none",
         seed=42,
     )
+    if initial_adapter:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_name, quantization_config=quantization_config, device_map={"": 0}
+        )
+        base_model = prepare_model_for_kbit_training(base_model)
+        model = PeftModel.from_pretrained(base_model, str(initial_adapter), is_trainable=True)
+        trainer_options = {}
+    else:
+        model = model_name
+        trainer_options = {"quantization_config": quantization_config, "peft_config": peft_config}
     trainer = SFTTrainer(
-        model=model_name,
+        model=model,
         args=training_config,
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         processing_class=tokenizer,
-        quantization_config=quantization_config,
-        peft_config=peft_config,
+        **trainer_options,
     )
     trainer.model.print_trainable_parameters()
     from transformers import TrainerCallback
@@ -261,8 +284,11 @@ def main() -> None:
         type=Path,
         help="resume optimizer, scheduler, and model state from a Trainer checkpoint",
     )
+    parser.add_argument("--initial-adapter", type=Path, help="start a new training run from an existing LoRA adapter")
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
+    if args.initial_adapter and args.resume_from_checkpoint:
+        parser.error("--initial-adapter and --resume-from-checkpoint cannot be used together")
     args.train_path = args.train_path or (CATEGORY_TRAIN_PATH if args.task == "briefing" else DEFAULT_TRAIN_PATH)
     args.validation_path = args.validation_path or (CATEGORY_VALIDATION_PATH if args.task == "briefing" else DEFAULT_VALIDATION_PATH)
 
@@ -293,6 +319,8 @@ def main() -> None:
             raise ValueError(f"checkpoint base {checkpoint_base!r} does not match --model-name {args.model_name!r}")
     elif args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError("output directory is not empty; choose a new directory or resume a checkpoint")
+    initial_adapter = (validate_initial_adapter(args.initial_adapter, args.model_name, args.output_dir)
+                       if args.initial_adapter else None)
     resume_from_checkpoint = validate_resume_checkpoint(
         args.resume_from_checkpoint
     )
@@ -308,6 +336,7 @@ def main() -> None:
         max_length=args.max_length,
         resume_from_checkpoint=resume_from_checkpoint,
         model_name=args.model_name,
+        initial_adapter=initial_adapter,
     )
 
 

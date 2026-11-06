@@ -15,6 +15,16 @@ from . import evaluate
 from .smoke_test_model import render_generation_prompt
 
 
+def build_llama_command(executable: Path, model: Path, prompt: Path, threads: int,
+                        schema: Path | None) -> list[str]:
+    command = [str(executable), "-m", str(model), "-f", os.path.relpath(prompt),
+               "-n", "256", "--temp", "0", "-ngl", "0", "-c", "4096", "-t", str(threads),
+               "-no-cnv", "--no-display-prompt", "--simple-io"]
+    if schema is not None:
+        command.extend(["--json-schema-file", str(schema)])
+    return command
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gguf-path", type=Path, required=True)
@@ -24,10 +34,14 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--review-output", type=Path, required=True)
     parser.add_argument("--threads", type=int, default=6)
+    parser.add_argument("--json-schema-file", type=Path,
+                        help="optional JSON schema for constrained generation")
     args = parser.parse_args()
     for path in (args.gguf_path, args.llama_completion, args.cases):
         if not path.is_file():
             parser.error(f"file not found: {path}")
+    if args.json_schema_file is not None and not args.json_schema_file.is_file():
+        parser.error(f"JSON schema file not found: {args.json_schema_file}")
     for path in (args.output, args.review_output):
         if path.exists():
             parser.error(f"output already exists: {path}; choose a new path")
@@ -50,9 +64,8 @@ def main() -> None:
             tmp.write(prompt)
             prompt_path = Path(tmp.name)
         try:
-            cmd = [str(args.llama_completion), "-m", str(args.gguf_path), "-f", os.path.relpath(prompt_path),
-                   "-n", "256", "--temp", "0", "-ngl", "0", "-c", "4096", "-t", str(args.threads),
-                   "-no-cnv", "--no-display-prompt", "--simple-io"]
+            cmd = build_llama_command(args.llama_completion, args.gguf_path, prompt_path,
+                                      args.threads, args.json_schema_file)
             print(f"Evaluating case {current}/{case_count}...", file=sys.stderr, flush=True)
             start = time.perf_counter()
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -75,7 +88,8 @@ def main() -> None:
                 "--review-output", str(args.review_output)]
     evaluate.main(model_loader=lambda **_: (tokenizer, None), summary_generator=generate,
                   runtime_metadata={"runtime": "llama-completion CPU", "gguf_path": str(args.gguf_path),
-                                    "latency_includes_model_load": True, "threads": args.threads})
+                                    "latency_includes_model_load": True, "threads": args.threads,
+                                    "json_schema_file": str(args.json_schema_file) if args.json_schema_file else None})
 
 
 if __name__ == "__main__":

@@ -1,5 +1,25 @@
 # 브리핑 모델 실행·학습·평가 안내
 
+## 기존 어댑터를 이용한 추가 학습 준비
+
+`--initial-adapter`는 기존 LoRA 가중치에서 **새 학습**을 시작합니다.
+중단된 동일 학습의 optimizer와 진행 상태를 복구하는 `--resume-from-checkpoint`와는 다르며 두 옵션은 같이 쓸 수 없습니다.
+원본 어댑터와 결과 폴더는 별도로 지정해야 합니다. 기존 Q8 GGUF가 아닌 학습된 safetensors 어댑터가 필요합니다.
+이 경로로 RTX 3050 4GB에서 카톡형 합성 초안 50건의 1에포크 추가 학습을 완료했습니다.
+이는 한 번의 소규모 실험이며 요약 품질의 전반적인 향상이나 다른 환경에서의 동작을 보장하지 않습니다.
+`data/chat_continuation_pilot/`은 학습용 6건, 검증용 2건의 수동 합성 예시로, 학습 품질을 판단할 만큼 충분하지 않습니다.
+추가 사례를 검토하고 독립적인 평가셋 및 기존 사례와 섞은 데이터를 준비한 뒤 사용하세요.
+기존 `long_chat_evaluation*.jsonl` 평가 사례를 학습에 넣으면 비교 평가에 사용할 수 없습니다.
+
+## GGUF JSON 형식 제한 실험
+
+`evaluate_gguf_local`에 `--json-schema-file briefing_training/briefing_response_schema.json`을
+추가하면 llama-completion의 JSON 스키마 제한을 실험할 수 있습니다. 옵션을 생략하면 기존 방식입니다.
+동일 모델·입력으로 두 번 평가하고 각각 다른 결과 파일을 지정하세요. 모델 생성 내용의 정확성을
+보장하지 않으며, 실제 클라이언트 LLamaSharp에는 적용되지 않았습니다. 도구의 문맥 크기와 실행 방식은
+클라이언트와 다르므로 앱에서 별도로 검증해야 합니다. 독립 평가 데이터
+`data/category_briefing_v9/independent_chat_evaluation.jsonl`은 학습에 사용하지 않습니다.
+
 ## Qwen3-1.7B 비교 실험
 
 기존 v8 0.6B와 별도로 실행합니다. 1.7B 기본 모델에는 v8 어댑터나 체크포인트를 사용할 수 없습니다.
