@@ -1,10 +1,19 @@
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from briefing_training.evaluate_gguf import GGUFGenerator, GGUFQwenBackend, validate_server_url
+from briefing_training.evaluate_gguf_local import build_llama_command
 
 
 class GGUFEvaluationTests(unittest.TestCase):
+    def test_local_schema_is_opt_in(self):
+        args = (Path("llama.exe"), Path("model.gguf"), Path("prompt.txt"), 6)
+        baseline = build_llama_command(*args, None)
+        constrained = build_llama_command(*args, Path("schema.json"))
+        self.assertNotIn("--json-schema-file", baseline)
+        self.assertEqual(constrained, baseline + ["--json-schema-file", "schema.json"])
+
     def test_pipeline_backend_preserves_messages_and_non_thinking_template(self):
         backend = object.__new__(GGUFQwenBackend)
         backend.tokenizer = Mock()

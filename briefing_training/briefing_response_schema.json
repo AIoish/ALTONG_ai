@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "primary_category": {
+      "type": "string",
+      "enum": ["긴급 업무", "일반 업무", "일정/회의", "시스템/보안", "개인 중요", "개인 일반", "광고/홍보", "기타"]
+    },
+    "summary_lines": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1, "maxLength": 160},
+      "minItems": 1,
+      "maxItems": 3
+    }
+  },
+  "required": ["primary_category", "summary_lines"],
+  "additionalProperties": false
+}

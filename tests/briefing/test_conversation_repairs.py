@@ -50,6 +50,10 @@ class ConversationRepairTests(unittest.TestCase):
             config.write_text(json.dumps({"base_model_name_or_path": "Qwen/Qwen2.5-0.5B-Instruct"}), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "expected"):
                 validate_export(adapter, root / "merged")
+            config.write_text(json.dumps({"base_model_name_or_path": "Qwen/Qwen3-1.7B"}), encoding="utf-8")
+            self.assertEqual(validate_export(adapter, root / "merged", "Qwen/Qwen3-1.7B"), "Qwen/Qwen3-1.7B")
+            with self.assertRaisesRegex(ValueError, "expected"):
+                validate_export(adapter, root / "merged")
 
     def test_english_only_response_fails_required_korean_check(self):
         case = repair_cases("evaluation")[0]
