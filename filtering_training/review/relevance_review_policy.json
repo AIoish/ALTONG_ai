@@ -1,0 +1,494 @@
+{
+  "purpose": "Versioned review policy and exact-input fingerprints of individually inspected exception rows",
+  "created_date": "2026-11-08",
+  "status": "assistant_review_policy_not_human_certification",
+  "confirmed_user_rules": {
+    "same_topic_without_direct_help": 2,
+    "clear_current_over_conflicting_history": true,
+    "ambiguous_current_specific_history_can_support": 3,
+    "main_py_no_history_login_notice": 2,
+    "same_artifact_archive_location": 3,
+    "task_specific_reference_link": 3,
+    "same_artifact_file_format_information": 3,
+    "observation_template_for_current_usability_analysis": 3
+  },
+  "manual_cases": {
+    "v13rel_00253": {
+      "input_sha256": "918a56f15d7001a6c43f24f7528217d415ae8c61b12507f570f8c5ab32bb06c1",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_06400": {
+      "input_sha256": "17827fa0ee5bc21bf4b0c41360c0fadc9bb79bd836c5790d89fc939660e064f3",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_06900": {
+      "input_sha256": "0ab6ad872f5b7834067d97a22da47f707b0051c10fc43e7fbabf4af8feb10345",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_00364": {
+      "input_sha256": "e5a25c0c5ded4e17459bb25a55b5469b5ef63569a985c6ca5be9a6d4e39b1d1b",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01959": {
+      "input_sha256": "fcea1812fa8e5eeec2e8c381de740b5b10c99d84f0d946165e68220f426ca8af",
+      "score": 2,
+      "reason": "Spanish-learning joke has no direct learning aid; apply user-confirmed topic-chat score 2, replacing inherited 3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04249": {
+      "input_sha256": "4279720020f0bf140a8d2fa55713dd6cb7adbcc9daaaddbe4052271ee08c5f3c",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_00518": {
+      "input_sha256": "456342b7094d3eddf0849772e22a18e0878b5f524bdd623ff6697a304374d5ac",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01434": {
+      "input_sha256": "43d9ba09bd1be05a3b4a35d0f6640f96be21f473ace69005390549831eb04ba0",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04063": {
+      "input_sha256": "dc95672b63d77679914e82a13f3784829556424f3d5e88f09d97be9515b06c3f",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_00796": {
+      "input_sha256": "93fdc6358f817edc331042efaba046548f8eb81121067e38aacd832dd4522bb4",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_00854": {
+      "input_sha256": "530fe84401a63da584e0c94cc4704eec68217123f612dea76d22aec30e7f2eef",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05283": {
+      "input_sha256": "801fce200bafe1432d7c510acf065c89ff96aec3813aaa1f46f9ba05dbaabd26",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05426": {
+      "input_sha256": "29ee1e838fad20944ba67fe006ba04555a6a84817a2d560e94c75a3c0204aa50",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_00940": {
+      "input_sha256": "18ce414e40fceba89e7094a97edca60a714e3894b51049ba508e2b09f71f1002",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01073": {
+      "input_sha256": "f803cc96fa7d4b37d4548d27cfbfe967a5506ec883d7cbd4b827b192d00f489d",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01850": {
+      "input_sha256": "c8d08453479706a8032fe1bac388eed7089ebc5ba2196026bcbae20a56108367",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01074": {
+      "input_sha256": "370eae9e4d646fc4df3a3c3ba70f56e0f1e3a9d6e9764cba76fc040c3785e94f",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01282": {
+      "input_sha256": "415af8b4303c3372c5909e856343559d709ceadacc555a02f0fe60ca2f3b23aa",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05554": {
+      "input_sha256": "8eeeb3a4dc701681e76ce753d389d42fb1b9e71b97394d6ac844de85fbcfc7bd",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05587": {
+      "input_sha256": "2d67c9425dc50f34672023d25ce3baae2d3dc33c4d593c6e921cd28676335c53",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01302": {
+      "input_sha256": "c9dbd0b35f3f76fde8f4a03ee48b3a9a42d30ed602788ed4a783f84aee53b5be",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04601": {
+      "input_sha256": "d67b0277fa3daee1029aafb9da861e7e6db14739c73b7fd1d5ed756f06dab54d",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05193": {
+      "input_sha256": "cf727c167c345508e2b402bc4e5a3d3b6045811c5cb7a5f800d71338a75dd414",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01357": {
+      "input_sha256": "dc525695ca6f4b6ca02bbd25e20a5b797d123ce81321fcb9c5fb1794df90040b",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_06999": {
+      "input_sha256": "80b930580f25945dcb65133e5aefc425341ffba698161f6f3b4fe188dd88f12d",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01556": {
+      "input_sha256": "9de1353ab1246ee8f6227d1d9961230327dd485fff330a0d0e43321bdbe0311f",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_06935": {
+      "input_sha256": "de0dba4a2b1f2a461f27e5d4e02d958cffabf4511f524f23b6cb3284be12cd85",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_01791": {
+      "input_sha256": "140a87773623cb777bebd43ff3f965f46394d2f32bae342281fc48ff58584f11",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_02759": {
+      "input_sha256": "e1dc6dc43f1a17cb7ba476d74acd2cbe9698f921abb7f388eb816c990e12af0b",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_02850": {
+      "input_sha256": "fa643776ae08f52bb78b96122869c726a05bddd42c091dfff991c7a899c1c085",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_02855": {
+      "input_sha256": "f95f612161c7b133cfbfdbf1f1ed7a6efd7e02262e5a8edad0264171f1afc65f",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04304": {
+      "input_sha256": "48079a413cc667c4efd92f0ad33c717f94ca30398ba74ba0f9c7db18ce9bf70b",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07260": {
+      "input_sha256": "e37a3a5a854e3645705303bef83b76d5faf2f7f927031e32ef577c3738240dc4",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_03196": {
+      "input_sha256": "f8ffcc1b95edb126f919c324be543a7ff840ff8586aad2fe624cd59246a093b7",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_03259": {
+      "input_sha256": "397f6b63fdbaaacf7b58e6b0391e9dd1f9672664d82ce4da9c784c02938b30d9",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_03606": {
+      "input_sha256": "6ccf183e68d6bc424ea3803a80b6d31145698d1f4895783cfec7adb8a5d1bff0",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_03743": {
+      "input_sha256": "88ac8fde3dff9c32b30f738d6e0a4515192de2c833a9ffea2e9621f2f645d31d",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04827": {
+      "input_sha256": "b90a64b780ab635bb888f89636a5248adaf2963b8f35c41bcb52880c9a844e13",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07413": {
+      "input_sha256": "8e27c298a420038fa4fb6854ce79ec0d6240fb07c570fd4104a372e0cf4be5be",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_03986": {
+      "input_sha256": "30919fbd0947d4583b7166d4df829211142de01ef21c4a53c3f8008a265b702f",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04740": {
+      "input_sha256": "981bd0ab20c920608d1ba13c17aede42b078517d41dcf30d1f1c1804322641b5",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05567": {
+      "input_sha256": "35ac5458c3c8492916c9498fe54c8d1705b7c04bc13542be37f6ef9854a18a6b",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_04851": {
+      "input_sha256": "ee32dea4abe6e186a18bc4c2a205487106529a611b6ccffd17a0f2f7b8bd5b16",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_05253": {
+      "input_sha256": "5af205a0457c4d81e605fcb72f7d28fa2e91c8bef884e5f5ad2f3a7793ccf3dc",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_06723": {
+      "input_sha256": "9a41500f9e6a8d51592339aa8158585cd6962a3d4d75fcf3810d7224c685448c",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07278": {
+      "input_sha256": "46e602823da57d025a7cbafc26bbae520ebcc7e5fe482a93f1fa6b28a4ca5340",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07487": {
+      "input_sha256": "1b9dc734bc6cdafd922e24c1ae731f56ca76f3f701ecf28eb76eab52b02d6fb7",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07611": {
+      "input_sha256": "86f61c1b6f51aed716fe4d3ee980d0843059823923fcdbea31774edc91fe773d",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07612": {
+      "input_sha256": "dd7a29e6f244062798a28abce2157fd18bcd95ed632f9b3a397592014cf72da3",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07617": {
+      "input_sha256": "757e33e66685da7bcb5b2bd754aa5e14b47331e965abc39b82d239d23a1c24b3",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07622": {
+      "input_sha256": "e3a7b51626644f36068e15e0403e2dd5553d70f851ccd366fa0705bf2a576b1b",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_08275": {
+      "input_sha256": "7a21a4b1dd2f8ccb039cd68b0fe99a7441a376f0e8447b86f61c58f53a2d9efd",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_08276": {
+      "input_sha256": "d5757fc10421c36c71fb7f09f7979b4b11806a8102924a54015675687e61fe46",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_08281": {
+      "input_sha256": "4db8c8925d481ba9704146eb3c707aee1069a7bc14a7abb646bb9f0d0f8308ea",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_08286": {
+      "input_sha256": "c0ea2f304f17235e763411b7228fe2cefb7365778f1960b7487d5c42da0dc01e",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10162": {
+      "input_sha256": "ab78b8737c8a0eaa87427c2e9ad31dfd9fbf4f31eb6c06ad46e44244e5fec374",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10163": {
+      "input_sha256": "09ebf85fbdc055195fbbbdfdf0d550f2932c4c27629c64b8896a5a321ae96a46",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10164": {
+      "input_sha256": "a741452d27b66f0f56992d065f412d081da57927facf57bcb62e8b826d5341fa",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10165": {
+      "input_sha256": "40c48bb1cc7406efb10634815d43c735a6cb1f85cdc1b91c2ee1bc01296b39cc",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10166": {
+      "input_sha256": "655026f9a7c8607127f9f150a4c124ef320ecc02b1cda2fa342c94584a41cd1d",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10167": {
+      "input_sha256": "11f7431112ed7dfaf31e492f8a053064848f912d7df6c2003bb05e70c2ac1d72",
+      "score": 1,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10168": {
+      "input_sha256": "e60ed7543031231111fe48e09df2e198191503c779356fd7f093ae58b06f4668",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10169": {
+      "input_sha256": "30fe5d2812086aabc8c2f8ebd32dbf0653b73fa073f31043b60d977ab012a029",
+      "score": 2,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10170": {
+      "input_sha256": "b1194594a2c3db8f012b052a64de7e5b77d7c1f5ada41542763ed939a0704db4",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10171": {
+      "input_sha256": "7f7c2ed356d47294a0aa9a972287acecc8dd621f96e099d6890948b4c1a30b72",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10172": {
+      "input_sha256": "962d72a71d0cb279f284df88fe25fa62432a9594678805145784d2e128fee22a",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_10173": {
+      "input_sha256": "f8e9cad040044e133f5c683ca1a57615ef0f30a5d9a37b4454e4d79d9166c115",
+      "score": 3,
+      "reason": "Individually read notification and all supplied current/previous windows; unrelated=1, topic-only=2, useful task information=3.",
+      "reviewer": "assistant",
+      "human_reviewed": false
+    },
+    "v13rel_07917": {
+      "input_sha256": "5120b3d28167ac4910a4249e5f9d36471e1fb3a1198826d5f48326b2233946e1",
+      "score": 3,
+      "reason": "User explicitly confirmed that separating observations and researcher interpretations is useful for the current usability-research record review.",
+      "reviewer": "user",
+      "human_reviewed": true
+    }
+  },
+  "rule_version": "relevance_review_2026-11-08_v2"
+}
