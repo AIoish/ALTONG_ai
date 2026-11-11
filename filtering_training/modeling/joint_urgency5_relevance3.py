@@ -13,11 +13,13 @@ import statistics
 import time
 import unicodedata
 
+from filtering_training.common.encoder_model import build_encoder
+from filtering_training.common.encoder_training import classification_metrics, predict_logits, train_epoch
 from filtering_training.common.artifact_io import ROOT, created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_data import DEFAULT_DATASET, load_evaluation_inputs, load_windows_prepared
 from filtering_training.common.encoder_input import (
     INPUT_SCHEMA, LEGACY_INPUT_SCHEMA, RECENT_WINDOWS_POLICY,
-    encode_checked, input_text, legacy_input_text, windows_only_state,
+    encode_checked, input_text, legacy_input_text,
 )
 from filtering_training.common.validation_data import evaluation_sets, validation
 
@@ -49,7 +51,6 @@ def body_key(state):
 
 
 def evaluate(rows, predictions):
-    from sklearn.metrics import confusion_matrix, f1_score
     if len(rows) != len(predictions) or not rows:
         raise ValueError('Nonempty matching evaluation rows required')
     result = {'rows':len(rows)}
@@ -61,12 +62,7 @@ def evaluate(rows, predictions):
     expected = [passed(u,r) for u,r in zip(gold_u,gold_r)]
     actual = [passed(u,r) for u,r in zip(pred_u,pred_r)]
     for task,gold,pred,classes in [('urgency',gold_u,pred_u,5),('relevance',gold_r,pred_r,3)]:
-        result[task] = {
-            'classes':classes,'exact_correct':sum(g==p for g,p in zip(gold,pred)),
-            'exact_accuracy':sum(g==p for g,p in zip(gold,pred))/len(rows),
-            'macro_f1':float(f1_score(gold,pred,labels=list(range(1,classes+1)),average='macro',zero_division=0)),
-            'confusion_matrix':confusion_matrix(gold,pred,labels=list(range(1,classes+1))).tolist(),
-        }
+        result[task] = classification_metrics(gold, pred, classes)
     result.update(
         policy_correct=sum(g==p for g,p in zip(expected,actual)),
         policy_miss_ids=[ids[i] for i in range(len(rows)) if expected[i] and not actual[i]],
@@ -95,62 +91,16 @@ def safety_rank(original, development):
 
 
 def build_model(base=BASE, pretrained=True, attention='eager'):
-    import torch
-    from transformers import AutoConfig, AutoModel
-
-    class JointEncoder(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            config = AutoConfig.from_pretrained(str(base),local_files_only=True)
-            if config.model_type != 'roberta':
-                raise ValueError('This controlled experiment expects KLUE RoBERTa')
-            if pretrained:
-                self.encoder = AutoModel.from_pretrained(str(base),local_files_only=True,
-                                                        add_pooling_layer=False,attn_implementation=attention)
-            else:
-                self.encoder = AutoModel.from_config(config,add_pooling_layer=False,attn_implementation=attention)
-            self.dropout = torch.nn.Dropout(.1)
-            # Draw the original two five-class heads first to preserve the initial urgency
-            # head and the post-initialization RNG state of the old seed-42 experiment.
-            self.heads = torch.nn.ModuleList([torch.nn.Linear(config.hidden_size,5) for _ in TASKS])
-            old = self.heads[1]
-            with torch.random.fork_rng(devices=[]):
-                replacement = torch.nn.Linear(config.hidden_size,3)
-            with torch.no_grad():
-                replacement.weight.copy_(old.weight[:3])
-                replacement.bias.copy_(old.bias[:3])
-            self.heads[1] = replacement
-
-        def forward(self,input_ids,attention_mask):
-            hidden = self.encoder(input_ids=input_ids,attention_mask=attention_mask).last_hidden_state[:,0]
-            hidden = self.dropout(hidden)
-            return self.heads[0](hidden),self.heads[1](hidden)
-
-    return JointEncoder()
+    return build_encoder(base=base, pretrained=pretrained, head_sizes=(5, 3),
+                         initialize_head_sizes=(5, 5), attention=attention,
+                         required_model_type='roberta')
 
 
-def task_loss(outputs,tasks,labels,weights,denominator):
-    import torch
-    # Original stacked heads receive zero (not None) gradients for absent tasks;
-    # preserve AdamW decay on both heads even in a single-task effective batch.
-    loss = sum(logits.sum()*0 for logits in outputs)
-    for task,logits in enumerate(outputs):
-        selected = tasks == task
-        if selected.any():
-            loss = loss + torch.nn.functional.cross_entropy(logits[selected].float(),labels[selected],reduction='sum')*weights[task]/denominator
-    return loss
 
 
 def predictions(model,tokenizer,encoded):
-    import torch
-    model.eval()
-    all_u,all_r = [],[]
-    with torch.inference_mode():
-        for start in range(0,len(encoded),8):
-            batch = tokenizer.pad(encoded[start:start+8],padding=True,return_tensors='pt').to('cuda')
-            urgency,relevance = model(**batch)
-            all_u.extend((urgency.argmax(-1)+1).cpu().tolist())
-            all_r.extend((relevance.argmax(-1)+1).cpu().tolist())
+    urgency, relevance = predict_logits(model, tokenizer, encoded)
+    all_u, all_r = (urgency.argmax(-1) + 1).tolist(), (relevance.argmax(-1) + 1).tolist()
     return [{'urgency_score':all_u[2*i],'relevance_score':all_r[2*i+1]} for i in range(len(encoded)//2)]
 
 
@@ -205,34 +155,12 @@ def train_stage(folder,model,tokenizer,records,evals,eval_encoded,settings,selec
     best,stale,history,successful=None,0,[],0
     start_time=time.perf_counter()
     for epoch in range(1,settings['epochs_max']+1):
-        model.train()
-        order=list(range(len(records)))
-        random.Random(settings['seed']+epoch).shuffle(order)
-        losses=[]
-        for offset in range(0,len(order),16):
-            indices=order[offset:offset+16]
-            optimizer.zero_grad(set_to_none=True)
-            for micro in range(0,len(indices),4):
-                batch=[records[i] for i in indices[micro:micro+4]]
-                x=tokenizer.pad([b[0] for b in batch],padding=True,return_tensors='pt').to('cuda')
-                tasks=torch.tensor([b[1] for b in batch],device='cuda')
-                labels=torch.tensor([b[2] for b in batch],device='cuda')
-                with torch.autocast('cuda',dtype=torch.float16):
-                    outputs=model(**x)
-                    loss=task_loss(outputs,tasks,labels,weights,len(indices))
-                scaler.scale(loss).backward()
-                losses.append(loss.detach().item())
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(),1.)
-            previous=scaler.get_scale()
-            scaler.step(optimizer)
-            scaler.update()
-            if scaler.get_scale()>=previous:
-                scheduler.step()
-                successful+=1
-            if offset%1600==0:
-                print(json.dumps({'stage':selection,'epoch':epoch,'rows':min(offset+16,len(order)),
-                                  'total':len(order),'seconds':round(time.perf_counter()-start_time)}),flush=True)
+        epoch_result = train_epoch(
+            model, tokenizer, records, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
+            weights=weights, seed=settings['seed'] + epoch,
+            progress=lambda count: print(json.dumps({'stage': selection, 'epoch': epoch, 'rows': count,
+                'total': len(records), 'seconds': round(time.perf_counter()-start_time)}), flush=True))
+        successful += epoch_result['successful_updates']
         reports={}
         for name in (('validation',) if selection=='initial' else ('validation','safety_development')):
             values=predictions(model,tokenizer,eval_encoded[name])
@@ -240,7 +168,7 @@ def train_stage(folder,model,tokenizer,records,evals,eval_encoded,settings,selec
             write(folder/f'epoch-{epoch}.{name}.predictions.json',[dict(r,prediction=p) for r,p in zip(evals[name],values)])
         result=reports['validation']
         rank=initial_rank(result) if selection=='initial' else safety_rank(result,reports['safety_development'])
-        history.append({'epoch':epoch,'loss_micro_mean':statistics.mean(losses),'reports':reports,'rank':rank})
+        history.append({'epoch':epoch,'loss_micro_mean':epoch_result['loss_micro_mean'],'reports':reports,'rank':rank})
         write(folder/'history.json',history)
         if best is None or rank>best:
             best,stale=rank,0

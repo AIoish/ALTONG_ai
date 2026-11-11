@@ -14,6 +14,8 @@ import sys
 import threading
 import time
 
+from filtering_training.common.encoder_model import build_encoder
+from filtering_training.common.encoder_training import predict_logits, train_epoch
 from filtering_training.common.artifact_io import ROOT, created_date, digest, read, write
 from filtering_training.common.encoder_data import DEFAULT_DATASET, FROZEN_PREPARED, load_windows_prepared
 from filtering_training.common.encoder_input import INPUT_SCHEMA, input_text, encode_checked, input_schema_for_run
@@ -40,32 +42,8 @@ def score(samples, predictions):
 
 
 def build_model(config=None, base=BASE, attention="eager"):
-    import torch
-    from transformers import AutoConfig, AutoModel
-
-    class ScoreEncoder(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            model_config = AutoConfig.from_pretrained(str(base)) if config is None else config
-            kwargs = {'attn_implementation': attention}
-            if model_config.model_type == 'roberta':
-                kwargs['add_pooling_layer'] = False
-            self.encoder = (AutoModel.from_pretrained(str(base), **kwargs) if config is None
-                            else AutoModel.from_config(config, **kwargs))
-            self.dropout = torch.nn.Dropout(.1)
-            self.heads = torch.nn.ModuleList([torch.nn.Linear(self.encoder.config.hidden_size, 5) for _ in TASKS])
-
-        def forward(self, input_ids, attention_mask):
-            states = self.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
-            if self.encoder.config.model_type == 'modernbert':
-                weights = attention_mask.unsqueeze(-1).to(states.dtype)
-                features = (states * weights).sum(1) / weights.sum(1).clamp_min(1)
-            else:
-                features = states[:, 0]
-            features = self.dropout(features)
-            return torch.stack([head(features) for head in self.heads], dim=1)
-
-    return ScoreEncoder()
+    return build_encoder(base=base, config=config, pretrained=config is None,
+                         head_sizes=(5, 5), attention=attention, stack_outputs=True)
 
 
 def train(run, base=BASE, micro_batch=4, attention="eager", fused_adam=False, release_cache=False):
@@ -132,49 +110,19 @@ def train(run, base=BASE, micro_batch=4, attention="eager", fused_adam=False, re
     start = time.perf_counter()
     for epoch in range(1, 4):
         epoch_start = time.perf_counter()
-        model.train()
-        order = list(range(len(records)))
-        random.Random(42 + epoch).shuffle(order)
-        losses = []
-        for offset in range(0, len(order), 16):
-            ids = order[offset:offset + 16]
-            optimizer.zero_grad(set_to_none=True)
-            if release_cache:
-                torch.cuda.empty_cache()
-            for micro in range(0, len(ids), micro_batch):
-                batch = [records[i] for i in ids[micro:micro + micro_batch]]
-                x = tok.pad([b[0] for b in batch], padding=True, return_tensors='pt').to('cuda')
-                tasks = torch.tensor([b[1] for b in batch], device='cuda')
-                labels = torch.tensor([b[2] for b in batch], device='cuda')
-                with torch.autocast('cuda', dtype=torch.float16):
-                    logits = model(**x)[torch.arange(len(batch), device='cuda'), tasks]
-                    per_row = torch.nn.functional.cross_entropy(logits.float(), labels, reduction='none')
-                    loss = (per_row * task_weights[tasks]).sum() / len(ids)
-                scaler.scale(loss).backward()
-                losses.extend(per_row.detach().cpu().tolist())
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
-            old_scale = scaler.get_scale()
-            scaler.step(optimizer)
-            scaler.update()
-            if scaler.get_scale() >= old_scale:
-                scheduler.step()
-                total_updates += 1
-            if offset % 1600 == 0:
-                print(json.dumps({'epoch': epoch, 'rows': min(offset + 16, len(order)),
-                                  'train_ce': statistics.mean(losses[-1600:])}), flush=True)
-        model.eval()
-        all_logits = []
-        with torch.inference_mode():
-            for offset in range(0, len(val_encoded), 8):
-                x = tok.pad(val_encoded[offset:offset + 8], padding=True, return_tensors='pt').to('cuda')
-                all_logits.extend(model(**x).float().cpu().numpy())
-        predictions = [{task + '_score': int(all_logits[2 * i + j][j].argmax()) + 1
+        epoch_result = train_epoch(
+            model, tok, records, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
+            weights=task_weights, seed=42 + epoch, micro_batch=micro_batch,
+            release_cache=release_cache,
+            progress=lambda count: print(json.dumps({'epoch': epoch, 'rows': count}), flush=True))
+        total_updates += epoch_result['successful_updates']
+        logits = predict_logits(model, tok, val_encoded)
+        predictions = [{task + '_score': int(logits[j][2 * i + j].argmax()) + 1
                         for j, task in enumerate(TASKS)} for i in range(len(samples))]
         metrics = score(samples, predictions)
         rank = (metrics['policy_correct'], -metrics['urgent_false_blocks'],
                 sum(metrics[t + '_score']['exact_accuracy'] for t in TASKS))
-        row = {'epoch': epoch, 'train_ce': statistics.mean(losses), 'metrics': metrics,
+        row = {'epoch': epoch, 'loss_micro_mean': epoch_result['loss_micro_mean'], 'metrics': metrics,
                'seconds': time.perf_counter() - epoch_start, 'successful_updates_total': total_updates}
         history.append(row)
         write(run / 'history.json', history)
