@@ -8,8 +8,9 @@ from unittest.mock import patch
 import torch
 
 from filtering_training.modeling.joint_urgency5_relevance3 import (
-    build_model, evaluate, initial_rank, map_relevance, passed, safety_rank, task_loss,
+    build_model, evaluate, initial_rank, map_relevance, passed, safety_rank,
 )
+from filtering_training.common.encoder_training import task_loss
 
 
 class JointUrgencyRelevanceTests(unittest.TestCase):

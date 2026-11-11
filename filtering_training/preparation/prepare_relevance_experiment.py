@@ -11,7 +11,7 @@ import unicodedata
 
 from filtering_training.common.artifact_io import ROOT, created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_input import INPUT_SCHEMA, input_text
-from filtering_training.preparation.curate_relevance import core_body, key, write_lines
+from filtering_training.preparation.curate_relevance import context_only_reaction, core_body, key, write_lines
 
 
 OUTPUT = ROOT / 'filtering_training/outputs/v17_relevance_experiment_01'
@@ -55,7 +55,7 @@ def group_rows(rows, *, similarity=0.92):
             else:
                 tokens[token] = i
         body = normalized(core_body(row['state']['notification']['body']))
-        if body:
+        if body and not context_only_reaction(row['state']['notification']['body']):
             bodies[body].append(i)
     for indices in bodies.values():
         for i in indices[1:]:
@@ -116,14 +116,23 @@ def audit_rows(rows):
             'rows': len(rows), 'scores': dict(Counter(r['score'] for r in rows))}
 
 
-def assign_splits(rows, group_ids, *, fraction=0.2, seed=42):
+def assign_splits(rows, group_ids, *, fraction=0.2, seed=42, reference=None):
     if not 0 < fraction < 0.5:
         raise ValueError('validation fraction must be between 0 and 0.5')
     grouped = defaultdict(list)
     for row in rows:
         grouped[group_ids[row['id']]].append(row)
     forced = {g for g, members in grouped.items() if any(r['experiment']['train_only'] for r in members)}
-    candidates = sorted(set(grouped) - forced, key=lambda g: key([seed, g]))
+    fixed = {g: 'train' for g in forced}
+    for g, members in grouped.items():
+        inherited = {(reference or {})[r['id']] for r in members if r['id'] in (reference or {})}
+        if g in fixed:
+            inherited.add(fixed[g])
+        if len(inherited) > 1 or inherited - {'train', 'validation'}:
+            raise ValueError('new grouping bridges frozen train and validation')
+        if inherited:
+            fixed[g] = inherited.pop()
+    candidates = sorted(set(grouped) - set(fixed), key=lambda g: key([seed, g]))
     # Select whole groups, optimizing class counts against targets on eligible rows.
     totals = Counter(r['score'] for g in candidates for r in grouped[g])
     target = {s: totals[s] * fraction for s in (1, 2, 3)}
@@ -145,7 +154,7 @@ def assign_splits(rows, group_ids, *, fraction=0.2, seed=42):
         row = deepcopy(original)
         group = group_ids[row['id']]
         row['experiment_group'] = group
-        row['split'] = 'validation' if group in selected else 'train'
+        row['split'] = fixed.get(group, 'validation' if group in selected else 'train')
         row['training_eligible'] = False
         result.append(row)
     for split in ('train', 'validation'):
@@ -171,7 +180,7 @@ def verify_splits(rows, source_rows, group_ids, near_edges):
         groups[row['experiment_group']].add(split)
         signatures[input_key(row)].add(split)
         body = normalized(core_body(row['state']['notification']['body']))
-        if body:
+        if body and not context_only_reaction(row['state']['notification']['body']):
             bodies[body].add(split)
     if any(len(s) > 1 for mapping in (groups, signatures, bodies) for s in mapping.values()):
         raise ValueError('group/input/body leakage across splits')
@@ -180,10 +189,63 @@ def verify_splits(rows, source_rows, group_ids, near_edges):
     return {'all_rows_accounted_for': True, 'scores_and_states_unchanged': True,
             'group_overlap': 0, 'exact_input_overlap': 0, 'normalized_core_body_overlap': 0,
             'detected_near_duplicate_overlap': 0,
+            'reaction_grouping': 'Context-only reactions use full-input and scenario groups, not a global character group.',
             'warning': 'Lexical grouping cannot establish complete semantic independence.'}
 
 
-def load_sources(balanced, pilot, real):
+def reviewed_examples(path):
+    path = Path(path).resolve()
+    manifest_path = path.parent / 'manifest.json'
+    manifest = read(manifest_path)
+    protected = {str(manifest_path): digest(manifest_path)}
+    for name, expected in manifest['files'].items():
+        target = (path.parent / name).resolve()
+        if not target.is_relative_to(path.parent) or digest(target) != expected:
+            raise ValueError('review artifact hash mismatch')
+        protected[str(target)] = expected
+    if str(path) not in protected:
+        raise ValueError('review data is not protected by its manifest')
+    selected, controls = [], set()
+    for probe in load_lines(path):
+        exact = probe['label_status'] == 'user_confirmed_input'
+        control = (probe['label_status'] == 'user_confirmed_example' and
+                   probe['context_id'] == 'approval_target' and probe['body'] in ('네', '아니'))
+        if not exact and not control:
+            continue
+        score = probe['reference_score']
+        if type(score) is not int or score not in (1, 2, 3) or input_key(probe) != probe['input_sha256']:
+            raise ValueError('review score/input fingerprint mismatch')
+        if exact:
+            decision = probe.get('review', {})
+            if (decision.get('reviewer') != 'user' or decision.get('human_reviewed') is not True or
+                    decision.get('input_sha256') != probe['input_sha256'] or decision.get('proposed_score') != score):
+                raise ValueError('exact user review attribution missing')
+        else:
+            # One representative of each confirmed approval example, not all app variants.
+            control_key = (probe['context_id'], probe['body'])
+            if control_key in controls:
+                continue
+            controls.add(control_key)
+            if score != 2:
+                raise ValueError('approval context must retain user-confirmed score 2')
+        identifier = 'reviewed_' + probe['id']
+        selected.append({'id': identifier, 'group_id': 'reviewed_' + probe['context_id'],
+            'split': 'unassigned', 'state': deepcopy(probe['state']), 'score': score,
+            'review_status': 'user_confirmed_input' if exact else 'confirmed_rule_applied_control',
+            'review': deepcopy(probe.get('review', {})), 'training_eligible': False,
+            'case_kind': 'user_confirmed_reaction' if exact else 'approval_acknowledgment_control',
+            'provenance': {'origin': 'reviewed_diagnostic', 'real_user_data': probe['scope'] == 'training_side_capture',
+                           'probe_id': probe['id'], 'label_status': probe['label_status']},
+            'experiment': {'origin': 'reviewed', 'loss_origin': 'pilot', 'source_file': str(path),
+                'source_input_sha256': probe['input_sha256'], 'group_hints': ['reviewed:context:' + probe['context_id']],
+                'train_only': True, 'label_source': 'user' if exact else 'user_rule_applied',
+                'label_status': 'reviewed_training_example_not_independent_gold'}})
+    if not selected:
+        raise ValueError('no confirmed review rows')
+    return selected, protected
+
+
+def load_sources(balanced, pilot, real, *, reviewed=None, protected=None):
     sources, excluded = [], []
     for name, path in [('balanced', balanced), ('pilot', pilot), ('real', real)]:
         for original in load_lines(path):
@@ -203,20 +265,38 @@ def load_sources(balanced, pilot, real):
                                  'label_source': 'user' if row.get('review', {}).get('human_reviewed') else 'assistant',
                                  'label_status': 'candidate_not_independent_gold'}
             sources.append(row)
+    if reviewed is not None:
+        extra, hashes = reviewed_examples(reviewed)
+        sources.extend(extra)
+        if protected is not None:
+            protected.update(hashes)
     return sources, excluded
 
 
-def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, similarity=0.92):
+def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, similarity=0.92, reference=None, reviewed=None):
     output = Path(output)
     if output.exists():
         raise ValueError('preserve existing experiment; choose a new output folder')
     protected = {str(Path(p).resolve()): digest(p) for p in (balanced, pilot, real)}
-    sources, excluded = load_sources(balanced, pilot, real)
+    sources, excluded = load_sources(balanced, pilot, real, reviewed=reviewed, protected=protected)
+    reference_splits = {}
+    if reference is not None:
+        by_id = {r['id']: r for r in sources}
+        for split in ('train', 'validation'):
+            path = Path(reference) / f'relevance/{split}.jsonl'
+            protected[str(path.resolve())] = digest(path)
+            for old in load_lines(path):
+                if old['id'] in reference_splits:
+                    raise ValueError('duplicate frozen reference ID')
+                current = by_id.get(old['id'])
+                if current is None or current['score'] != old['score'] or current['state'] != old['state']:
+                    raise ValueError('frozen reference row changed or missing')
+                reference_splits[old['id']] = split
     audit = audit_rows(sources)
     if audit['exact_input_label_conflicts'] or audit['content_window_score_warnings']:
         raise ValueError('label conflicts require review before splitting: ' + json.dumps(audit, ensure_ascii=False))
     groups, near = group_rows(sources, similarity=similarity)
-    rows = assign_splits(sources, groups, fraction=fraction, seed=seed)
+    rows = assign_splits(sources, groups, fraction=fraction, seed=seed, reference=reference_splits)
     verification = verify_splits(rows, sources, groups, near)
     output.mkdir(parents=True)
     (output / 'relevance').mkdir()
@@ -240,6 +320,10 @@ def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, simi
                 'near_duplicate_cosine_threshold': similarity, 'near_duplicate_edges': len(near),
                 'source_rows': len(sources) + len(excluded), 'candidate_rows': len(rows),
                 'excluded_rows': len(excluded), 'splits': summary,
+                'frozen_reference': str(Path(reference).resolve()) if reference else None,
+                'frozen_reference_rows': len(reference_splits),
+                'reviewed_source': str(Path(reviewed).resolve()) if reviewed else None,
+                'reviewed_rows': sum(r['experiment']['origin'] == 'reviewed' for r in rows),
                 'human_labeled_real_rows': sum(r['experiment']['origin'] == 'real' and r['experiment']['label_source'] == 'user' for r in rows),
                 'training_ready': False, 'final_test_created': False, 'urgency_changed': False,
                 'protected_sources': protected,
@@ -261,5 +345,8 @@ if __name__ == '__main__':
     parser.add_argument('--real', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, default=OUTPUT)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--reference', type=Path)
+    parser.add_argument('--reviewed-probes', type=Path)
     args = parser.parse_args()
-    prepare(args.balanced, args.pilot, args.real, args.output_dir, seed=args.seed)
+    prepare(args.balanced, args.pilot, args.real, args.output_dir, seed=args.seed,
+            reference=args.reference, reviewed=args.reviewed_probes)

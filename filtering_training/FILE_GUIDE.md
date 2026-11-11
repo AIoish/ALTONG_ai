@@ -1,5 +1,11 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-11: 새 관련도 실험의 진입점은 `modeling/relevance_only.py`다.
+> `common/encoder_model.py`와 `encoder_training.py`를 기존 Encoder 학습·추론 경로에서도 사용한다.
+> 단문 원문 비교는 `quality/audit_relevance_reactions.py`, 모델 읽기는 `modeling/relevance_only.load_run`을 재사용한다.
+> 같은 역할의 기존 모델 클래스·학습 루프·추론 루프는 원래 파일에서 제거했다.
+> 아래 과거 경로 표와 구분해 [관련도 전용 안내](README.md#관련도-전용-학습과-평가)를 참고한다.
+
 > 2026-11-04 갱신: Encoder 공통코드는 `common/artifact_io.py`, `encoder_input.py`,
 > `validation_data.py`, `score_metrics.py`, `encoder_data.py`로 분리했다.
 > 기존 학습·추론·대조 도구는 `legacy/modeling/`, Qwen 전용 헬퍼는 `legacy/common/`으로 이동했다.

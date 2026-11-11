@@ -3,11 +3,9 @@
 """
 
 from copy import deepcopy
-import json
 import re
 import unittest
 
-from filtering_training.common.encoder_input import input_text
 from filtering_training.generation.prepare_relevance_diversity import make_drafts, validate_drafts
 from filtering_training.preparation.curate_relevance import body_group, curate
 from filtering_training.quality.audit_relevance_diversity import template_report
@@ -72,7 +70,7 @@ class RelevanceCurationTests(unittest.TestCase):
     def test_drafts_are_reproducible_and_not_approved_training_data(self):
         rows = make_drafts()
         self.assertEqual(rows, make_drafts())
-        self.assertEqual(len(rows), 52)
+        self.assertEqual(len(rows), 148)
         validate_drafts(rows)
         self.assertTrue(all(r['review_status'] == 'ai_proposed_unreviewed' for r in rows))
         self.assertTrue(all(r['split'] == 'unassigned' for r in rows))
@@ -102,7 +100,7 @@ class RelevanceCurationTests(unittest.TestCase):
         rows = make_drafts()
         by_id = {r['id']: r for r in rows}
         pairs = [r for r in rows if r['case_kind'] == 'current_history_conflict']
-        self.assertEqual(len(pairs), 8)
+        self.assertEqual(len(pairs), 16)
         for row in pairs:
             original = by_id[row['paired_with']]
             self.assertEqual(row['state']['notification'], original['state']['notification'])
@@ -116,6 +114,22 @@ class RelevanceCurationTests(unittest.TestCase):
             self.assertEqual((a['notification'].pop('body'), b['notification'].pop('body')), ('ㅇ', 'ㅁ'))
             self.assertEqual(a, b)
             self.assertEqual((first['score'], second['score']), (1, 1))
+
+    def test_new_reaction_pairs_have_contextual_labels_and_identical_other_fields(self):
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for row in make_drafts():
+            if row.get('invariance_group'):
+                groups[row['invariance_group']].append(row)
+        self.assertEqual(len(groups), 24)
+        for pair in groups.values():
+            self.assertEqual(len(pair), 2)
+            first, second = pair
+            a, b = deepcopy(first['state']), deepcopy(second['state'])
+            self.assertEqual((a['notification'].pop('body'), b['notification'].pop('body')), ('ㅇ', 'ㅁ'))
+            self.assertEqual(a, b)
+            self.assertEqual(first['score'], 2 if first['case_kind'] == 'project_room_character' else 1)
+            self.assertEqual(first['score'], second['score'])
 
     def test_ambiguous_current_pair_changes_only_history(self):
         rows = make_drafts()

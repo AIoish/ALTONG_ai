@@ -9,9 +9,9 @@ import json
 from pathlib import Path
 import re
 
-from filtering_training.common.artifact_io import ROOT, created_date, digest, load_lines, read, write
+from filtering_training.common.artifact_io import created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_input import INPUT_SCHEMA, RECENT_WINDOWS_POLICY, input_text
-from filtering_training.preparation.curate_relevance import OUTPUT, body_group, key, profile, write_lines
+from filtering_training.preparation.curate_relevance import OUTPUT, body_group, context_only_reaction, key, profile, write_lines
 
 # Hand-authored scenarios, not a Cartesian multiplication of interchangeable nouns.
 SCENARIOS = (
@@ -74,6 +74,32 @@ SCENARIOS = (
 )
 
 APPS = ('Slack', 'Teams', 'KakaoTalk.exe')
+SUPPLEMENT = (
+    ('visitor_badge', 'Code.exe', 'badge_reader.cs — 방문증 QR 인식 오류 수정', '방문증 서비스',
+     '방문증 QR에 공백이 섞인 경우도 읽도록 수정했어. 수정 파일 올렸어.',
+     '방문증 디자인은 회사마다 느낌이 다르더라', '오늘 점심 메뉴 뭐야?'),
+    ('subtitle_timing', 'Premiere.exe', '박물관 소개 영상 — 2분 구간 자막 싱크 조정', '박물관 영상 편집',
+     '박물관 영상 2분 구간 자막을 0.8초 늦춘 파일 올렸어.',
+     '박물관 영상들 보면 자막 색이 다 비슷한 것 같아', '우리 집 고양이가 또 상자를 차지했어'),
+    ('library_extension', 'chrome.exe', '대출 도서 반납일 연장 가능 여부 확인', '도서 대출 관리',
+     '확인하던 대출 도서는 다음 주 월요일까지 연장할 수 있대.',
+     '도서관에서 책 읽을 때가 제일 조용한 것 같아', '퇴근길에 우산 챙겨'),
+    ('portfolio_links', 'WINWORD.EXE', '지원서 포트폴리오 주소 누락 확인.docx', '지원서 검토',
+     '지원서 두 번째 경력의 포트폴리오 주소가 빠졌어. 링크 보낼게.',
+     '요즘 포트폴리오 표지는 다들 개성 있게 만들더라', '베란다 화분에 새잎이 났어'),
+    ('warehouse_bins', 'EXCEL.EXE', '물류센터 선반 번호와 재고표 대조.xlsx', '선반 재고 대조',
+     '재고표 B-12 선반 번호를 B-21로 잘못 적었어. 정정표 공유할게.',
+     '물류센터 정리 영상은 보고 있으면 묘하게 편안해', '토요일에 영화 보러 갈 사람?'),
+    ('map_legend', 'Illustrator.exe', '축제 안내 지도 — 화장실 범례 교체.ai', '축제 지도 제작',
+     '축제 지도 화장실 범례를 새 아이콘으로 교체한 파일 보냈어.',
+     '축제 지도는 모아 두면 여행 기념품 같아', '방금 배달 음식 도착했대'),
+    ('meeting_minutes', 'Notion.exe', '독서 모임 회의록 — 다음 발표 순서 정리', '독서 모임 회의록',
+     '회의록에 다음 발표 순서가 뒤집혀 있어. 수정된 순서표 여기 있어.',
+     '독서 모임 사람들은 다 책 취향이 다른 게 재밌어', '휴대폰 배경화면 바꿨어'),
+    ('printer_layout', 'Acrobat.exe', '양면 인쇄 시 뒷면 여백 잘림 확인.pdf', '인쇄 여백 점검',
+     '확인 중인 PDF 뒷면 여백을 5mm 늘린 교정본 올렸어.',
+     '인쇄소 작업 구경하는 영상이 은근 재밌어', '오늘 산책하다가 무지개 봤어'),
+)
 DISTRACTORS = (
     {'app_name': 'chrome.exe', 'window_title': '주말 날씨 - Chrome'},
     {'app_name': 'explorer.exe', 'window_title': '다운로드 - 파일 탐색기'},
@@ -155,6 +181,39 @@ def make_drafts():
                 count = len(original['state']['context']['recent_windows'])
                 variant['state']['context']['recent_windows'] = deepcopy(list(DISTRACTORS[:(count + 2) % 4]))
             rows.append(variant)
+    # New contexts and hand-authored sentences; preserve the original 52 records.
+    extra = [{'family': family, 'process': process, 'window': window, 'title': title,
+              'sender': '협업 담당', 'messages': {3: useful, 2: topic, 1: unrelated}}
+             for family, process, window, title, useful, topic, unrelated in SUPPLEMENT]
+    for i, scenario in enumerate(extra):
+        for score in (3, 2, 1):
+            add(scenario, score, scenario['messages'][score], 'same_current_different_notification')
+        positive = deepcopy(rows[-3])
+        other = extra[(i + 3) % len(extra)]
+        for history, kind in (([{'app_name': scenario['process'], 'window_title': scenario['window']}],
+                               'current_history_conflict'), ([], 'clear_other_current_without_history')):
+            add(scenario, 1, scenario['messages'][3], kind,
+                current=(other['process'], other['window']), history=history)
+            rows[-1]['state']['notification'] = deepcopy(positive['state']['notification'])
+            rows[-1]['paired_with'] = positive['id']
+        for title, score, current, history, kind in (
+            (scenario['title'], 2, None, [], 'project_room_character'),
+            ('새 메시지', 1, None, [], 'generic_room_character'),
+            (scenario['title'], 1, (other['process'], other['window']),
+             [{'app_name': scenario['process'], 'window_title': scenario['window']}], 'conflicting_room_character')):
+            for character in ('ㅇ', 'ㅁ'):
+                add(scenario, score, character, kind, current=current, history=history, title=title)
+            first, second = rows[-2:]
+            second['state'] = deepcopy(first['state'])
+            second['state']['notification']['body'] = 'ㅁ'
+            pair = 'reaction_' + scenario['family'] + '_' + kind
+            for row in rows[-2:]:
+                row['invariance_group'] = pair
+                row['reason'] = ('현재 창과 방의 작업 단서만으로 2점; 의미 없는 문자는 3점 근거가 아님' if score == 2
+                                 else '현재 작업과 연결되는 단서가 없거나 현재 창이 다른 작업을 명확히 가리킴')
+        add(scenario, 3, scenario['messages'][3], 'history_resolves_ambiguous_current',
+            current=(scenario['process'], '제목 없음'),
+            history=[{'app_name': scenario['process'], 'window_title': scenario['window']}])
     return rows
 
 
@@ -179,7 +238,7 @@ def validate_drafts(rows):
     by_body = {}
     for row in rows:
         group = body_group(row['state']['notification']['body'])
-        if group in by_body and by_body[group] != row['group_id']:
+        if not context_only_reaction(row['state']['notification']['body']) and group in by_body and by_body[group] != row['group_id']:
             raise ValueError('the same body cannot be split across scenario groups')
         by_body[group] = row['group_id']
 
@@ -249,7 +308,7 @@ def prepare(output=OUTPUT, batch_name=None):
                 'real_user_data_received': False, 'training_used': False, 'splits_assigned': False,
                 'source_files_unchanged': True, 'protected_hashes': protected,
                 'files': {name: {'sha256': digest(output / name)} for name in targets[:2]},
-                'limitations': ['Eight authored scenario groups are not a representative final benchmark.',
+                'limitations': ['Authored scenario groups are not a representative final benchmark.',
                                 'Group whole scenarios and variants before making any evaluation split.',
                                 'Labels and app/history variations require semantic review.',
                                 'Do not mix unreviewed proposals into approved training data.']}

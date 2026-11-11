@@ -44,6 +44,12 @@ def body_group(body):
     return 'body_' + key(normalized)[:20]
 
 
+def context_only_reaction(body):
+    # These short reactions carry no task target; split them by scenario/context.
+    value = ''.join(unicodedata.normalize('NFKC', body).split())
+    return value in {unicodedata.normalize('NFKC', token) for token in ('ㅇ', 'ㅁ', 'ㅋ', 'ㅋㅋ', 'ㅎㅎ', 'ㄴ', 'ㅡㅡ')}
+
+
 def profile(records):
     app = defaultdict(Counter)
     history = defaultdict(Counter)

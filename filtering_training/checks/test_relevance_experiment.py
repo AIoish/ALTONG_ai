@@ -8,8 +8,9 @@ from pathlib import Path
 import unittest
 
 from filtering_training.preparation.curate_relevance import write_lines
+from filtering_training.common.artifact_io import digest, write
 from filtering_training.preparation.prepare_relevance_experiment import (
-    assign_splits, audit_rows, group_rows, prepare, verify_splits,
+    assign_splits, audit_rows, group_rows, prepare, reviewed_examples, verify_splits,
 )
 
 
@@ -25,6 +26,51 @@ def row(identifier, score=1, *, body=None, group=None, train_only=False):
 class RelevanceExperimentTests(unittest.TestCase):
     def fixture(self):
         return [row(f'example-{score}-{i}', score) for score in (1, 2, 3) for i in range(8)]
+
+    def reviewed_fixture(self, folder):
+        from filtering_training.quality.audit_relevance_reactions import authored_contexts, make_probes
+        probes = []
+        for p in make_probes(authored_contexts()):
+            if p['context_id'] == 'project_code' and p['app'] == 'KakaoTalk.exe' and p['label_status'] == 'user_confirmed_example':
+                p['label_status'] = 'user_confirmed_input'
+                p['review'] = {'reviewer': 'user', 'human_reviewed': True,
+                               'input_sha256': p['input_sha256'], 'proposed_score': 1}
+                probes.append(p)
+            elif p['context_id'] == 'approval_target' and p['label_status'] == 'user_confirmed_example':
+                probes.append(p)
+            elif p['context_id'] == 'project_code' and p['body'] == '넵' and p['app'] == 'KakaoTalk.exe':
+                probes.append(p)
+        path = folder / 'probes.jsonl'
+        write_lines(path, probes)
+        write(folder / 'manifest.json', {'files': {'probes.jsonl': digest(path)}})
+        return path, probes
+
+    def test_reviewed_import_selects_six_confirmations_and_two_controls_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path, _ = self.reviewed_fixture(Path(temp))
+            rows, protected = reviewed_examples(path)
+            self.assertEqual(len(rows), 8)
+            self.assertEqual(sum(r['score'] == 1 for r in rows), 6)
+            self.assertEqual(sum(r['score'] == 2 for r in rows), 2)
+            self.assertTrue(all(r['experiment']['train_only'] for r in rows))
+            self.assertTrue(all(r['experiment']['loss_origin'] == 'pilot' for r in rows))
+            self.assertEqual(sum(r['experiment']['label_source'] == 'user' for r in rows), 6)
+            self.assertIn(str(path.resolve()), protected)
+
+    def test_reviewed_import_checks_fingerprints_and_user_attribution(self):
+        for mutation in ('hash', 'reviewer'):
+            with tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                path, probes = self.reviewed_fixture(folder)
+                probe = next(p for p in probes if p['label_status'] == 'user_confirmed_input')
+                if mutation == 'hash':
+                    probe['state']['notification']['body'] = 'changed'
+                else:
+                    probe['review']['human_reviewed'] = False
+                write_lines(path, probes)
+                write(folder / 'manifest.json', {'files': {'probes.jsonl': digest(path)}})
+                with self.assertRaises(ValueError):
+                    reviewed_examples(path)
 
     def test_identical_input_different_label_is_a_conflict(self):
         a = row('a', 1)
@@ -85,6 +131,24 @@ class RelevanceExperimentTests(unittest.TestCase):
         first[0]['score'] = 3
         with self.assertRaises(ValueError):
             verify_splits(first, rows, groups, near)
+
+    def test_context_only_characters_can_use_different_scenarios_without_input_leakage(self):
+        a, b = row('reaction-a', 1, body='ㅇ'), row('reaction-b', 2, body='ㅇ')
+        groups, _ = group_rows([a, b])
+        self.assertNotEqual(groups[a['id']], groups[b['id']])
+        b['state'] = deepcopy(a['state'])
+        groups, _ = group_rows([a, b])
+        self.assertEqual(groups[a['id']], groups[b['id']])
+
+    def test_reference_members_keep_their_split_and_bridging_is_rejected(self):
+        rows = self.fixture()
+        groups, _ = group_rows(rows)
+        frozen = {rows[0]['id']: 'validation', rows[1]['id']: 'train'}
+        output = assign_splits(rows, groups, reference=frozen)
+        self.assertTrue(all(r['split'] == frozen[r['id']] for r in output if r['id'] in frozen))
+        groups[rows[1]['id']] = groups[rows[0]['id']]
+        with self.assertRaisesRegex(ValueError, 'bridges frozen'):
+            assign_splits(rows, groups, reference=frozen)
 
     def test_bad_labels_ids_and_old_schema_rejected(self):
         for rows in ([row('a', True)], [row('a', 4)], [row('a'), row('a')]):

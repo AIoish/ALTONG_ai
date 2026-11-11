@@ -2,7 +2,6 @@
 생성일: 2026-10-10
 """
 import argparse
-import hashlib
 import json
 import math
 import random
@@ -15,6 +14,8 @@ import torch
 from transformers import AutoConfig, AutoTokenizer, get_linear_schedule_with_warmup
 
 from functools import partial
+from filtering_training.common.artifact_io import ROOT, read, write, digest, load_lines as lines
+from filtering_training.common.encoder_training import predict_logits, train_epoch
 from filtering_training.modeling.encoder_score_experiment import build_model, score
 from filtering_training.common.encoder_input import LEGACY_INPUT_SCHEMA, legacy_input_text as input_text, encode_checked
 from filtering_training.common.validation_data import validation as current_validation
@@ -22,24 +23,8 @@ from filtering_training.common.validation_data import validation as current_vali
 validation = partial(current_validation, schema=LEGACY_INPUT_SCHEMA)
 from src.filtering.policy import should_pass
 
-ROOT = Path(__file__).resolve().parents[2]
 TASKS=('urgency','relevance')
 
-def read(path):
-    return json.loads(path.read_text(encoding='utf-8'))
-
-def lines(path):
-    return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
-
-def write(path,value):
-    path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-
-def digest(path):
-    h=hashlib.sha256()
-    with path.open('rb') as stream:
-        for block in iter(lambda:stream.read(1048576),b''):
-            h.update(block)
-    return h.hexdigest()
 
 def main():
     parser=argparse.ArgumentParser()
@@ -112,12 +97,8 @@ def main():
     tok.save_pretrained(args.run/'tokenizer'); model.encoder.config.save_pretrained(args.run/'encoder')
 
     def predictions(encoded):
-        model.eval(); logits=[]
-        with torch.inference_mode():
-            for offset in range(0,len(encoded),8):
-                x=tok.pad(encoded[offset:offset+8],padding=True,return_tensors='pt').to('cuda')
-                logits.extend(model(**x).float().cpu().numpy())
-        return [{task+'_score':int(logits[2*i+j][j].argmax())+1 for j,task in enumerate(TASKS)} for i in range(len(encoded)//2)]
+        logits = predict_logits(model, tok, encoded)
+        return [{task+'_score':int(logits[j][2*i+j].argmax())+1 for j,task in enumerate(TASKS)} for i in range(len(encoded)//2)]
 
     def dev_metrics(preds):
         rows=[{'gold':r['label'],'prediction':p} for r,p in zip(dev,preds)]
@@ -150,29 +131,17 @@ def main():
     write(args.run/'epoch-0.predictions.json',[{'validation_index':i,'notification_id':v.notification.id,'notification':v.notification.model_dump(mode='json'),'context':v.context.model_dump(mode='json'),'gold':v.label.model_dump(mode='json'),'prediction':q} for i,(v,q) in enumerate(zip(old_samples,original_baseline))])
     write(args.run/'epoch-0.development.predictions.json',[dict(r,prediction=q) for r,q in zip(dev,development_baseline)])
     for epoch in range(1,args.epochs+1):
-        model.train(); order=list(range(len(records))); random.Random(73+epoch).shuffle(order); losses=[]
-        for offset in range(0,len(order),16):
-            ids=order[offset:offset+16]; optimizer.zero_grad(set_to_none=True)
-            for micro in range(0,len(ids),4):
-                batch=[records[i] for i in ids[micro:micro+4]]
-                x=tok.pad([b[0] for b in batch],padding=True,return_tensors='pt').to('cuda')
-                tasks=torch.tensor([b[1] for b in batch],device='cuda'); labels=torch.tensor([b[2] for b in batch],device='cuda')
-                with torch.autocast('cuda',dtype=torch.float16):
-                    logits=model(**x)[torch.arange(len(batch),device='cuda'),tasks]
-                    ce=torch.nn.functional.cross_entropy(logits.float(),labels,reduction='none')
-                    loss=(ce*weights[tasks]).sum()/len(ids)
-                scaler.scale(loss).backward(); losses.extend(ce.detach().cpu().tolist())
-            scaler.unscale_(optimizer); torch.nn.utils.clip_grad_norm_(model.parameters(),1.)
-            previous=scaler.get_scale(); scaler.step(optimizer); scaler.update()
-            if scaler.get_scale()>=previous:
-                scheduler.step();total_updates+=1
-            if offset%800==0:
-                print(json.dumps({'epoch':epoch,'rows':min(offset+16,len(records)),'total':len(records),'recent_ce':sum(losses[-800:])/len(losses[-800:]),'elapsed_seconds':round(time.perf_counter()-start)}),flush=True)
+        epoch_result = train_epoch(
+            model, tok, records, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
+            weights=weights, seed=73 + epoch,
+            progress=lambda count: print(json.dumps({'epoch': epoch, 'rows': count,
+                'total': len(records), 'elapsed_seconds': round(time.perf_counter()-start)}), flush=True))
+        total_updates += epoch_result['successful_updates']
         old_preds=predictions(old_encoded); dm_preds=predictions(dev_encoded)
         om=score(old_samples,old_preds); dm=dev_metrics(dm_preds)
         eligible=(om['policy_correct']>=old_baseline_metrics['policy_correct'] and om['urgent_false_blocks']<=old_baseline_metrics['urgent_false_blocks'] and dm['urgent_misses']<=baseline_dm['urgent_misses'] and dm['false_passes']<=baseline_dm['false_passes'] and dm['urgent_threshold_misses']<=baseline_dm['urgent_threshold_misses'] and dm['policy_correct']>=baseline_dm['policy_correct'])
         rank=ranking(om,dm)
-        result={'epoch':epoch,'train_ce':sum(losses)/len(losses),'original':om,'development':dm,'eligible':eligible,'rank':rank,'elapsed_seconds':time.perf_counter()-start}
+        result={'epoch':epoch,'loss_micro_mean':epoch_result['loss_micro_mean'],'original':om,'development':dm,'eligible':eligible,'rank':rank,'elapsed_seconds':time.perf_counter()-start}
         history.append(result);write(args.run/'history.json',history);write(args.run/f'epoch-{epoch}.json',result)
         write(args.run/f'epoch-{epoch}.predictions.json',[{'validation_index':i,'notification_id':s.notification.id,
                                                         'notification':s.notification.model_dump(mode='json'),

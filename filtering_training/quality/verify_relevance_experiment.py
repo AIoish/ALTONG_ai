@@ -14,7 +14,7 @@ from filtering_training.preparation.prepare_relevance_experiment import (
 )
 
 
-def verify(folder=OUTPUT):
+def verify(folder=OUTPUT, *, write_report=True):
     folder = Path(folder)
     manifest = read(folder / 'manifest.json')
     for path, expected in manifest['protected_sources'].items():
@@ -27,7 +27,7 @@ def verify(folder=OUTPUT):
     paths = {r['experiment']['origin']: Path(r['experiment']['source_file']) for r in rows}
     if any(str(p.resolve()) not in manifest['protected_sources'] for p in paths.values()):
         raise ValueError('unprotected source path')
-    sources, excluded = load_sources(*(paths[name] for name in ('balanced', 'pilot', 'real')))
+    sources, excluded = load_sources(*(paths[name] for name in ('balanced', 'pilot', 'real')), reviewed=paths.get('reviewed'))
     if excluded != load_lines(folder / 'review/excluded.jsonl'):
         raise ValueError('exclusion accounting changed')
     audit = audit_rows(rows)
@@ -35,6 +35,18 @@ def verify(folder=OUTPUT):
         raise ValueError('label conflicts found')
     near = load_lines(folder / 'review/near-duplicate-links.jsonl')
     result = verify_splits(rows, sources, {r['id']: r['experiment_group'] for r in rows}, near)
+    if manifest.get('frozen_reference'):
+        current = {r['id']: r for r in rows}
+        count = 0
+        for split in ('train', 'validation'):
+            for old in load_lines(Path(manifest['frozen_reference']) / f'relevance/{split}.jsonl'):
+                new = current.get(old['id'])
+                if new is None or new['split'] != split or new['state'] != old['state'] or new['score'] != old['score']:
+                    raise ValueError('frozen reference changed')
+                count += 1
+        if count != manifest['frozen_reference_rows']:
+            raise ValueError('frozen reference accounting mismatch')
+        result['frozen_reference_rows_preserved'] = count
     hint_groups = defaultdict(set)
     for row in rows:
         for hint in row['experiment']['group_hints']:
@@ -53,11 +65,12 @@ def verify(folder=OUTPUT):
                   maximum_tokens=max(lengths, default=0), source_hashes_unchanged=True,
                   lineage_and_scenario_groups_preserved=True, training_ready=False,
                   manifest_sha256=digest(folder / 'manifest.json'), tokenizer_sha256=digest(tokenizer_path))
-    target = folder / 'review/readiness-verification.json'
-    if target.exists():
-        raise ValueError('preserve prior verification; use a new experiment folder')
-    write(target, result)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if write_report:
+        target = folder / 'review/readiness-verification.json'
+        if target.exists():
+            raise ValueError('preserve prior verification; use a new experiment folder')
+        write(target, result)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
 
