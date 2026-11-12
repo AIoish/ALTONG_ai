@@ -94,6 +94,19 @@ def validate_resume_checkpoint(path: Path | None) -> Path | None:
     return checkpoint
 
 
+def validate_initial_adapter(path: Path, model_name: str, output_directory: Path) -> Path:
+    adapter = path.expanduser().resolve()
+    if not (adapter / "adapter_config.json").is_file() or not (adapter / "adapter_model.safetensors").is_file():
+        raise ValueError("initial adapter must contain adapter_config.json and adapter_model.safetensors")
+    config = json.loads((adapter / "adapter_config.json").read_text(encoding="utf-8"))
+    if config.get("base_model_name_or_path") != model_name:
+        raise ValueError("initial adapter base model does not match --model-name")
+    output = output_directory.expanduser().resolve()
+    if output == adapter or adapter in output.parents or output in adapter.parents:
+        raise ValueError("initial adapter and output directory must be separate")
+    return adapter
+
+
 def to_prompt_completion(record: Mapping[str, Any]) -> dict[str, Any]:
     joint = "primary_category" in record.get("target", {})
     messages = category_training_messages(record) if joint else training_messages(record)
@@ -142,10 +155,12 @@ def train(
     learning_rate: float,
     max_length: int,
     resume_from_checkpoint: Path | None = None,
+    model_name: str = MODEL_NAME,
+    initial_adapter: Path | None = None,
 ) -> None:
     import torch
-    from peft import LoraConfig
-    from transformers import AutoTokenizer, BitsAndBytesConfig
+    from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from trl import SFTConfig, SFTTrainer
 
     if not torch.cuda.is_available():
@@ -167,7 +182,7 @@ def train(
         task_type="CAUSAL_LM",
         target_modules="all-linear",
     )
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -203,14 +218,23 @@ def train(
         report_to="none",
         seed=42,
     )
+    if initial_adapter:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_name, quantization_config=quantization_config, device_map={"": 0}
+        )
+        base_model = prepare_model_for_kbit_training(base_model)
+        model = PeftModel.from_pretrained(base_model, str(initial_adapter), is_trainable=True)
+        trainer_options = {}
+    else:
+        model = model_name
+        trainer_options = {"quantization_config": quantization_config, "peft_config": peft_config}
     trainer = SFTTrainer(
-        model=MODEL_NAME,
+        model=model,
         args=training_config,
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         processing_class=tokenizer,
-        quantization_config=quantization_config,
-        peft_config=peft_config,
+        **trainer_options,
     )
     trainer.model.print_trainable_parameters()
     from transformers import TrainerCallback
@@ -221,7 +245,7 @@ def train(
         def on_save(self, args, state, control, **kwargs):
             checkpoint_dir = Path(args.output_dir) / f"checkpoint-{state.global_step}"
             (checkpoint_dir / "briefing_task.json").write_text(
-                json.dumps({"task": task}), encoding="utf-8",
+                json.dumps({"task": task, "model_name": model_name}), encoding="utf-8",
             )
 
     trainer.add_callback(ContractCallback())
@@ -233,7 +257,7 @@ def train(
     trainer.save_model(str(output_directory))
     tokenizer.save_pretrained(output_directory)
     (output_directory / "briefing_task.json").write_text(
-        json.dumps({"task": task}), encoding="utf-8",
+        json.dumps({"task": task, "model_name": model_name}), encoding="utf-8",
     )
     trainer.save_metrics("train", result.metrics)
     evaluation_metrics = trainer.evaluate()
@@ -244,6 +268,7 @@ def train(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", choices=("briefing", "summary"), default="briefing")
+    parser.add_argument("--model-name", default=MODEL_NAME, help="Qwen3 base model identifier")
     parser.add_argument("--train-path", type=Path)
     parser.add_argument(
         "--validation-path", type=Path
@@ -259,8 +284,11 @@ def main() -> None:
         type=Path,
         help="resume optimizer, scheduler, and model state from a Trainer checkpoint",
     )
+    parser.add_argument("--initial-adapter", type=Path, help="start a new training run from an existing LoRA adapter")
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
+    if args.initial_adapter and args.resume_from_checkpoint:
+        parser.error("--initial-adapter and --resume-from-checkpoint cannot be used together")
     args.train_path = args.train_path or (CATEGORY_TRAIN_PATH if args.task == "briefing" else DEFAULT_TRAIN_PATH)
     args.validation_path = args.validation_path or (CATEGORY_VALIDATION_PATH if args.task == "briefing" else DEFAULT_VALIDATION_PATH)
 
@@ -282,7 +310,17 @@ def main() -> None:
         state_file = args.resume_from_checkpoint / "briefing_task.json"
         if not state_file.is_file() or json.loads(state_file.read_text(encoding="utf-8")).get("task") != "briefing":
             raise ValueError("cannot resume a v5/v6 summary-only checkpoint for the new briefing task")
-
+    if args.resume_from_checkpoint:
+        adapter_config = args.resume_from_checkpoint / "adapter_config.json"
+        if not adapter_config.is_file():
+            raise ValueError("resume checkpoint is missing adapter_config.json")
+        checkpoint_base = json.loads(adapter_config.read_text(encoding="utf-8")).get("base_model_name_or_path")
+        if checkpoint_base != args.model_name:
+            raise ValueError(f"checkpoint base {checkpoint_base!r} does not match --model-name {args.model_name!r}")
+    elif args.output_dir.exists() and any(args.output_dir.iterdir()):
+        raise ValueError("output directory is not empty; choose a new directory or resume a checkpoint")
+    initial_adapter = (validate_initial_adapter(args.initial_adapter, args.model_name, args.output_dir)
+                       if args.initial_adapter else None)
     resume_from_checkpoint = validate_resume_checkpoint(
         args.resume_from_checkpoint
     )
@@ -297,6 +335,8 @@ def main() -> None:
         learning_rate=args.learning_rate,
         max_length=args.max_length,
         resume_from_checkpoint=resume_from_checkpoint,
+        model_name=args.model_name,
+        initial_adapter=initial_adapter,
     )
 
 
