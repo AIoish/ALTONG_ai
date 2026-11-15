@@ -89,7 +89,7 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 
 2026-11-15 실행 결과 창 충돌은 4/8→8/8로 개선됐지만, 선택 모델의 전체 정답이 975/985→956/985로 후퇴해 모델 교체 후보로 채택하지 않았다. 기본 v19와 기존 모델 03을 유지한다. 에폭별 결과·단문과 전체 검증의 앱 민감도 차이는 기존 실험 기록에 남겼다.
 
-체크포인트는 출처별 macro F1의 단순 평균을 먼저 보고, 전체 macro F1·정확도·낮은 MAE 순으로 선택한다. 큰 기존 문장 계열이 새 시나리오의 퇴보를 가리지 않게 출처를 동등하게 평가한다. 완전히 같으면 이전 체크포인트를 유지하고, 두 번 연속 개선이 없으면 중단한다. 긴급도 정답이나 통과 정책은 모델 선택에 사용하지 않는다.
+2026-11-15 사용자 확정 기준에 따라 새 학습의 체크포인트는 1·2·3점 정확도, macro F1, 낮은 MAE 순으로 선택한다. 완전히 같으면 이전 체크포인트를 유지하고, 두 번 연속 개선이 없으면 중단한다. 과거 모델 03·04는 당시 출처별 macro F1 평균으로 선택한 결과를 그대로 보존한다. 긴급도는 관련도 모델 선택에 사용하지 않는다. 체크포인트 선택과 실사용 채택 판단은 별개다.
 
 정확도·macro F1·MAE·1~3 혼동행렬, 3점 누락과 오탐 ID, 데이터 출처별 지표를 저장한다. 학습 분포의 최다 클래스를 항상 예측하는 기준선도 같은 검증 자료로 계산한다. 유형별 지표와 단문 대비 쌍의 점수 일관성·정답 일치도 함께 기록한다. 매 에폭 예측과 오답에는 원래 ID·점수·확률·그룹·출처를 남긴다. 자료가 들어 있는 출력은 Git 제외 대상이다.
 
@@ -113,7 +113,7 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 
 ### 코드 검증
 
-학습 도구 검사 156개와 기존 필터링 검사 35개, 총 191개가 통과했다. 기존 공동 모델의 Encoder·긴급도 헤드 초기화와 RNG 보존, task weight·없는 작업의 zero gradient, 미완성 배치를 포함한 micro batch 누적 등가성, 관련도 헤드 하나만 역전파·저장·복원되는지, 후보 점수 사용 구분과 체크포인트 해시 변경 거부를 확인했다. 실제 v19·v20·v21 자료의 dry-run도 통과했다. 출처별 선택 기준·가중 손실 누적·기존 분할 동결·반응 문자 시나리오 분리·현재 창 대비의 학습 전용 분할·진단 입력 단일 요인 변경·정책 이관 및 저장 예측 재채점 검사도 포함한다.
+학습 도구 검사 162개와 기존 필터링 검사 35개, 총 197개를 검증했다. 기존 공동 모델의 초기화·누적 학습·정책 이관 검사에 더해 정확도 우선 선택, 0.5%p 채택 경계, 3점 누락/오탐 퇴행 거부, 평가 세션 누출 차단, 예측 비공개 검수와 미응답 보존, 평가 전용 자료의 학습 유입 거부를 검사한다. 실제 v19·v20·v21 자료의 dry-run도 통과했다.
 
 ### 단문 원문 진단
 
@@ -141,6 +141,61 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 ```
 
 같은 원본 앱으로 바꾸거나 실제 입력에 최근 창이 없어서 변화가 없는 경우는 비교에서 제외한다. `model-*.cases.jsonl`에 원본 정답 일치·앱별 점수·최근 창 제거 점수를 모으고, `model-*.predictions.jsonl`에 입력 지문·확률을 기록한다. manifest에 원본·체크포인트·코드·결과 해시를 남긴다. 원본은 변경하지 않으며 이전 결과 폴더를 덮어쓰지 않는다. 추론·입력 직렬화·평가 함수는 기존 공통 경로를 사용한다. 이 진단은 신경망 내부 가중치나 독립 최종 성능을 측정하지 않는다.
+
+### 실제 평가 자료와 모델 채택 조건
+
+`quality/relevance_evaluation.py`의 사용자 확정 계약 `relevance-adoption-v1`은 점수 정확도를 우선하며, 기준 모델 대비 정확도 하락을 최대 0.5%p까지 허용한다. 3점 알림 누락 또는 오탐은 한 건이라도 증가하면 보류한다. 같은 라벨·입력·행 수에서 비교하며, 985건에서는 최대 4건 감소까지 허용하고 5건부터 거부한다. 개발 조건을 통과해도 최종 실사용 평가 완료나 배포 승인을 뜻하지 않는다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.quality.relevance_evaluation `
+  --dataset filtering_training/outputs/v21_relevance_reaction_policy_01/baseline `
+  --real-capture filtering_training/outputs/v16_real_relevance_review_01/relevance/unlabeled.jsonl `
+  --additional-known filtering_training/outputs/v21_relevance_reaction_policy_01/current-priority/relevance/train.jsonl `
+  --output filtering_training/outputs/_maintenance/evaluation-new/inventory.json
+
+.\.venv\Scripts\python.exe -m filtering_training.quality.relevance_evaluation `
+  --dataset filtering_training/outputs/v21_relevance_reaction_policy_01/baseline `
+  --baseline-run filtering_training/outputs/runs/2026-11-12-klue-relevance-only-03 `
+  --candidate-run filtering_training/outputs/runs/2026-11-15-klue-relevance-only-04 `
+  --output filtering_training/outputs/_maintenance/evaluation-new/comparison
+```
+
+inventory에는 자료의 사용 이력과 해시를 기록한다. 기존 학습·개발 검증·이미 검토한 수집·추가 후보는 최종 평가로 전용하지 않는다.
+
+새 실제 알림은 기존 `preparation.prepare_real_relevance --source-csv <새 CSV> --output-dir <새 폴더>`로 변환한 뒤, 결과의 `relevance/unlabeled.jsonl`을 다음 절차로 준비한다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_real_evaluation `
+  --source <새 수집의 relevance/unlabeled.jsonl> --draft-plan `
+  --output filtering_training/outputs/_maintenance/evaluation-new/session-plan.json
+```
+
+세션 계획의 `sessions`는 수집 변환기의 잠정 그룹 ID별 역할을 처음에는 null로 둔다. 그룹이 실제 대화·작업 세션과 맞는지 확인하고 `real_development` 또는 `real_final`을 지정한다. `new_capture_confirmed`와 `natural_capture_confirmed`도 직접 확인해야 한다. 필요하면 `assignments`에 행 ID별 `session_id`·`role`·선택적 `case_kind`를 기록해 그룹 경계를 수정한다. 자기 선언과 어휘 기반 유사도만으로 완전한 독립성을 보장하지는 않는다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_real_evaluation `
+  --source <새 수집의 relevance/unlabeled.jsonl> `
+  --plan filtering_training/outputs/_maintenance/evaluation-new/session-plan.json `
+  --inventory filtering_training/outputs/_maintenance/evaluation-new/inventory.json `
+  --output filtering_training/outputs/_maintenance/evaluation-new/prepared
+```
+
+기존 `group_rows`의 입력·본문·근접 문장·계보 묶음을 재사용하며, 의미 없는 반응의 전역 본문 묶음만 새 정책에 맞게 제외한다. 같은 세션·중복·유사 본문이 서로 다른 평가 역할이나 이미 사용한 자료와 연결되면 준비를 거부한다. 잠정 그룹을 사람이 확인하고, inventory에 모든 사용 자료를 포함해야 한다.
+
+`prepared/review/검수하기.html`은 기존 검수 UI를 사용하되 예측·제안 점수·제안 일괄 승인 버튼을 숨긴다. 20개씩 묶으며 모델 점수를 보지 않고 선택한 답변 JSON을 저장한다. 입력 밖 대화를 추측하지 않고 보류를 선택할 수 있다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_real_evaluation `
+  --source filtering_training/outputs/_maintenance/evaluation-new/prepared `
+  --answers <저장한 답변 JSON> `
+  --output filtering_training/outputs/_maintenance/evaluation-new/reviewed
+```
+
+명시 답변만 라벨이 되고 미응답·보류는 `pending-or-held.jsonl`에 남는다. 확정 반응 정책과 충돌하는 점수는 거부한다. 역할별 결과는 `real_development.jsonl`, `real_final.jsonl`이며 기존 학습 준비 경로가 두 역할 모두의 학습 유입을 거부한다.
+
+실제 개발용 자료의 모델 비교는 `quality.relevance_evaluation --real-rows <reviewed/real_development.jsonl> --baseline-run <기준 실행> --candidate-run <후보 실행> --output <새 경로> --device cpu`를 사용한다. 사용자 직접 검수·입력 지문·자료 해시·정책·모델 해시를 확인하고 공통 모델 로딩·추론·지표 함수를 재사용한다. 최종 평가 역할은 개발 모델 선택 명령에서 거부한다.
+
+새 실제 자료는 아직 확보·검수되지 않았으므로 실제 개발 평가·최종 평가 결과는 미완료다. 최종 자료는 모델 선택에 반복 사용하지 않고, 학습 비중 실험의 후보가 정해진 뒤 별도 최종 평가로 확인해야 한다. 현재 개발 검증이나 단문 변형의 정답률을 실사용 최종 성능으로 표현하지 않는다.
 
 ## 한국어 Encoder CPU 비교
 
