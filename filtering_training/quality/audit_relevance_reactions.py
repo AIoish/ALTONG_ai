@@ -11,6 +11,7 @@ from pathlib import Path
 
 from filtering_training.common.artifact_io import created_date, digest, load_lines, write
 from filtering_training.common.encoder_input import encode_checked, input_text
+from filtering_training.common.relevance_policy import POLICY, targetless
 from filtering_training.modeling.relevance_only import load_run, predictions
 from filtering_training.preparation.curate_relevance import key, write_lines
 
@@ -68,7 +69,9 @@ def authored_contexts():
     return contexts
 
 
-def make_probes(contexts):
+def make_probes(contexts, *, label_policy='legacy'):
+    if label_policy not in ('legacy', POLICY):
+        raise ValueError('unknown label policy')
     if len({c['id'] for c in contexts}) != len(contexts):
         raise ValueError('duplicate context ID')
     probes = []
@@ -82,7 +85,9 @@ def make_probes(contexts):
                 state = deepcopy(context['state'])
                 state['notification'].update(body=body, app_name=app)
                 score, status = None, 'policy_pending'
-                if control is not None:
+                if label_policy == POLICY and targetless(body):
+                    score, status = 1, 'user_confirmed_rule_applied'
+                elif control is not None:
                     score, status = control, 'rule_applied_proposal'
                 elif body in context.get('confirmed_examples', {}) and context.get('confirmed_app') in (None, app):
                     score, status = context['confirmed_examples'][body], 'user_confirmed_example'
@@ -131,7 +136,7 @@ def summarize(probes, scores):
             'interpretation': 'Category spreads are observations, not errors or equivalence judgments.'}
 
 
-def write_first_review(output, probes):
+def write_first_review(output, probes, *, label_policy='legacy'):
     selected = []
     for body in ('ㅇㅇ', 'ㅇㅋ', '네', '아니', 'ㅋㅋ', 'ㅠㅠ'):
         selected.append(next(p for p in probes if p['context_id'] == 'project_code' and p['body'] == body and p['app'] == APPS[0]))
@@ -147,7 +152,8 @@ def write_first_review(output, probes):
         score = p['reference_score'] if p['label_status'].startswith('user_confirmed') else ''
         lines.append(f"| {card} | {p['body']} | {score} |")
     lines += ['', '답변 예: `A=2, B=2, C=보류, D=2, E=1, F=2` — 형식 예시이며 제안 점수가 아니다.',
-              '알림 제목이 구체적인 승인 대상인 별도 맥락의 네·아니=2점 결정은 이 프로젝트 방 사례에 자동 적용하지 않는다.']
+              ('대상 없는 반응은 승인 제목이어도 1점이며, 기존 승인 제목 예외를 대체한다.' if label_policy == POLICY else
+               '알림 제목이 구체적인 승인 대상인 별도 맥락의 네·아니=2점 결정은 이 프로젝트 방 사례에 자동 적용하지 않는다.')]
     (output / 'first-review.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
     write(output / 'first-review-inputs.json', {'purpose': 'Bind six review cards and confirmed scores to exact model inputs',
         'created_date': created_date(), 'cards': {card: {'probe_id': p['id'], 'input_sha256': p['input_sha256'],
@@ -155,7 +161,7 @@ def write_first_review(output, probes):
             for card, p in zip('ABCDEF', selected)}})
 
 
-def audit(runs, output, *, extra_contexts=None, device='cuda'):
+def audit(runs, output, *, extra_contexts=None, device='cuda', label_policy=POLICY):
     output = Path(output)
     if output.exists():
         raise ValueError('preserve earlier audit; choose a new folder')
@@ -164,7 +170,7 @@ def audit(runs, output, *, extra_contexts=None, device='cuda'):
     if extra_contexts:
         source_hash = digest(extra_contexts)
         contexts += load_lines(extra_contexts)
-    probes = make_probes(contexts)
+    probes = make_probes(contexts, label_policy=label_policy)
     output.mkdir(parents=True)
     write_lines(output / 'probes.jsonl', probes)
     reports = {}
@@ -191,11 +197,11 @@ def audit(runs, output, *, extra_contexts=None, device='cuda'):
                 p['reference_score'], p['label_status'], '', ''])
     if extra_contexts and digest(extra_contexts) != source_hash:
         raise ValueError('source contexts changed')
-    write_first_review(output, probes)
+    write_first_review(output, probes, label_policy=label_policy)
     write(output / 'manifest.json', {'purpose': 'Raw short-expression diagnostic, not independent evaluation or training',
-        'created_date': created_date(), 'normalization_applied': False, 'rows': len(probes), 'contexts': len(contexts),
+        'created_date': created_date(), 'label_policy': label_policy, 'normalization_applied': False, 'rows': len(probes), 'contexts': len(contexts),
         'context_source_sha256': source_hash, 'models': {k: {'run': r['run'], 'checkpoint_sha256': r['checkpoint_sha256']} for k, r in reports.items()},
-        'pending_labels_not_scored': True, 'user_policy': 'Project-code review A-F score 1 on the reviewed app; other cases remain individually scoped; approval-title yes/no without dialogue score 2.',
+        'pending_labels_not_scored': True, 'user_policy': ('Targetless reactions score 1 including approval titles; meaningful short messages are separate.' if label_policy == POLICY else 'Historical scoped examples and approval yes/no score 2.'),
         'files': {p.name: digest(p) for p in output.iterdir() if p.is_file()},
         'limitations': ['Includes training-side captures and authored development contexts.',
                         'No prior conversation is available.', 'Only explicit reference examples have labels; other expressions await review.']})
@@ -212,5 +218,6 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--contexts', type=Path)
     parser.add_argument('--device', choices=('cuda', 'cpu'), default='cuda')
+    parser.add_argument('--label-policy', choices=('legacy', POLICY), default=POLICY)
     args = parser.parse_args()
-    audit(args.run, args.output_dir, extra_contexts=args.contexts, device=args.device)
+    audit(args.run, args.output_dir, extra_contexts=args.contexts, device=args.device, label_policy=args.label_policy)

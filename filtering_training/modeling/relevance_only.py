@@ -18,7 +18,7 @@ from filtering_training.preparation.curate_relevance import write_lines
 from filtering_training.quality.verify_relevance_experiment import verify
 
 BASE = ROOT / 'filtering_training/outputs/models/klue-roberta-base'
-DATASET = ROOT / 'filtering_training/outputs/v19_relevance_reviewed_reactions_01'
+DATASET = ROOT / 'filtering_training/outputs/v21_relevance_reaction_policy_01/baseline'
 DEFAULTS = {'seed': 42, 'epochs': 3, 'micro_batch': 2, 'effective_batch': 16,
             'eval_batch': 8, 'encoder_lr': 2e-5, 'head_lr': 1e-4, 'warmup_ratio': .1,
             'weight_decay': .01, 'patience': 2, 'attention': 'sdpa', 'device': 'cuda',
@@ -123,6 +123,7 @@ def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False):
                   Path(__file__).resolve(), ROOT / 'filtering_training/common/encoder_model.py',
                   ROOT / 'filtering_training/common/encoder_training.py',
                   ROOT / 'filtering_training/common/encoder_input.py',
+                  ROOT / 'filtering_training/common/relevance_policy.py',
                   ROOT / 'filtering_training/quality/verify_relevance_experiment.py')}}
     return rows, encoded, tokenizer, config
 

@@ -11,6 +11,7 @@ import unicodedata
 
 from filtering_training.common.artifact_io import ROOT, created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_input import INPUT_SCHEMA, input_text
+from filtering_training.common.relevance_policy import POLICY, apply_policy
 from filtering_training.preparation.curate_relevance import context_only_reaction, core_body, key, write_lines
 
 
@@ -273,12 +274,13 @@ def load_sources(balanced, pilot, real, *, reviewed=None, protected=None):
     return sources, excluded
 
 
-def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, similarity=0.92, reference=None, reviewed=None):
+def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, similarity=0.92, reference=None, reviewed=None, label_policy=POLICY):
     output = Path(output)
     if output.exists():
         raise ValueError('preserve existing experiment; choose a new output folder')
     protected = {str(Path(p).resolve()): digest(p) for p in (balanced, pilot, real)}
     sources, excluded = load_sources(balanced, pilot, real, reviewed=reviewed, protected=protected)
+    sources = apply_policy(sources, label_policy)
     reference_splits = {}
     if reference is not None:
         by_id = {r['id']: r for r in sources}
@@ -286,6 +288,7 @@ def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, simi
             path = Path(reference) / f'relevance/{split}.jsonl'
             protected[str(path.resolve())] = digest(path)
             for old in load_lines(path):
+                old = apply_policy([old], label_policy)[0]
                 if old['id'] in reference_splits:
                     raise ValueError('duplicate frozen reference ID')
                 current = by_id.get(old['id'])
@@ -325,7 +328,7 @@ def prepare(balanced, pilot, real, output=OUTPUT, *, seed=42, fraction=0.2, simi
                 'reviewed_source': str(Path(reviewed).resolve()) if reviewed else None,
                 'reviewed_rows': sum(r['experiment']['origin'] == 'reviewed' for r in rows),
                 'human_labeled_real_rows': sum(r['experiment']['origin'] == 'real' and r['experiment']['label_source'] == 'user' for r in rows),
-                'training_ready': False, 'final_test_created': False, 'urgency_changed': False,
+                'training_ready': False, 'final_test_created': False, 'urgency_changed': False, 'label_policy': label_policy,
                 'protected_sources': protected,
                 'files': {str(p.relative_to(output)): {'sha256': digest(p)} for p in output.rglob('*') if p.is_file()},
                 'limitations': ['Assistant labels remain candidates, not user-certified gold.',
@@ -347,6 +350,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--reference', type=Path)
     parser.add_argument('--reviewed-probes', type=Path)
+    parser.add_argument('--label-policy', choices=('legacy', POLICY), default=POLICY)
     args = parser.parse_args()
     prepare(args.balanced, args.pilot, args.real, args.output_dir, seed=args.seed,
-            reference=args.reference, reviewed=args.reviewed_probes)
+            reference=args.reference, reviewed=args.reviewed_probes, label_policy=args.label_policy)
