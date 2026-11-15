@@ -1,5 +1,8 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-13: `quality/audit_relevance_context.py`는 고정 검증 전체에서 알림 앱 변경·최근 창 제거에 따른 예측 민감도를 비교한다.
+> 단문 검수와 구분하며, 모델 읽기·추론·정답 지표는 기존 관련도 전용 코드를 재사용한다.
+
 > 2026-11-11: 새 관련도 실험의 진입점은 `modeling/relevance_only.py`다.
 > `common/encoder_model.py`와 `encoder_training.py`를 기존 Encoder 학습·추론 경로에서도 사용한다.
 > 단문 원문 비교는 `quality/audit_relevance_reactions.py`, 모델 읽기는 `modeling/relevance_only.load_run`을 재사용한다.
