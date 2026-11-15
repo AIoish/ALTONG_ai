@@ -1,5 +1,8 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-15: `common/relevance_mixture.py`는 동결 기준의 손실 비중과 신규 시나리오 비중을 계산한다.
+> `modeling/run_relevance_mixture.py`는 기존 학습·평가 경로로 사전 고정한 비중 비교와 조건부 반복 시드 실험을 실행한다.
+
 > 2026-11-15: `quality/relevance_evaluation.py`는 자료 사용 이력·사용자 확정 채택 조건·동일 자료 비교를 관리한다.
 > `preparation/prepare_real_evaluation.py`는 새 수집의 세션별 평가 분할·예측 비공개 검수를 준비하며 기존 검수 UI와 답변 처리기를 재사용한다.
 > 실제 개발 평가와 최종 평가 자료는 아직 확보·검수되지 않았다.

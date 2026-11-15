@@ -113,7 +113,7 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 
 ### 코드 검증
 
-학습 도구 검사 162개와 기존 필터링 검사 35개, 총 197개를 검증했다. 기존 공동 모델의 초기화·누적 학습·정책 이관 검사에 더해 정확도 우선 선택, 0.5%p 채택 경계, 3점 누락/오탐 퇴행 거부, 평가 세션 누출 차단, 예측 비공개 검수와 미응답 보존, 평가 전용 자료의 학습 유입 거부를 검사한다. 실제 v19·v20·v21 자료의 dry-run도 통과했다.
+학습 도구 검사 165개와 기존 필터링 검사 35개, 총 200개를 검증했다. 기존 공동 모델의 초기화·누적 학습·정책 이관 검사에 더해 정확도 우선 선택, 0.5%p 채택 경계, 3점 누락/오탐 퇴행 거부, 평가 세션 누출 차단, 예측 비공개 검수와 미응답 보존, 평가 전용 자료의 학습 유입 거부, 동결 학습 비중·시나리오별 총비중·0 가중치 누적 배치 등가성을 검사한다. 실제 v19·v20·v21 자료의 dry-run도 통과했다.
 
 ### 단문 원문 진단
 
@@ -141,6 +141,33 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 ```
 
 같은 원본 앱으로 바꾸거나 실제 입력에 최근 창이 없어서 변화가 없는 경우는 비교에서 제외한다. `model-*.cases.jsonl`에 원본 정답 일치·앱별 점수·최근 창 제거 점수를 모으고, `model-*.predictions.jsonl`에 입력 지문·확률을 기록한다. manifest에 원본·체크포인트·코드·결과 해시를 남긴다. 원본은 변경하지 않으며 이전 결과 폴더를 덮어쓰지 않는다. 추론·입력 직렬화·평가 함수는 기존 공통 경로를 사용한다. 이 진단은 신경망 내부 가중치나 독립 최종 성능을 측정하지 않는다.
+
+### 학습 비중 통제 실험
+
+`common/relevance_mixture.py`는 동결한 v21/baseline의 기존 자료 비중을 기준으로 신규 대비 자료의 총비중만 조절한다. 기존 합성·다양성·검수·실제 수집은 출처를 보존하면서 별도 가중치 그룹으로 보고한다. 기존 그룹 내부의 시나리오 비중은 기준 행 수에서 고정하며, 새 대비 시나리오는 각각 같은 총비중을 갖는다. 같은 신규 시나리오의 앱 변형이 늘어도 그 시나리오의 총비중이 자동으로 늘지 않는다. 가중치 합은 전체 평균 1로 맞춘다.
+
+새 자료 비중 0%·5%·10%를 비교할 때 세 실험 모두 v21/current-priority의 같은 4,147행·검증 985행·행 순서·학습 회차·유효 배치·스케줄 설정을 사용한다. 0%에서는 신규 168행의 손실 가중치를 0으로 둔다. 이 행도 순전파와 배치 진행에는 포함되지만 해당 정답의 손실 신호를 주지 않는다. 이전 3,979행만 학습한 모델과 계산 경로가 완전히 같은 실행이라고 표현하지 않는다. AMP 스텝 생략 여부 등 실제 성공한 optimizer update 수도 함께 확인해야 한다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.modeling.relevance_only `
+  --dataset-dir filtering_training/outputs/v21_relevance_reaction_policy_01/current-priority `
+  --mixture-reference filtering_training/outputs/v21_relevance_reaction_policy_01/baseline `
+  --supplement-share 0.05 --allow-candidate-labels --dry-run
+
+.\.venv\Scripts\python.exe -m filtering_training.modeling.run_relevance_mixture `
+  --allow-candidate-labels --dry-run `
+  --output filtering_training/outputs/_maintenance/mixture-preflight-next
+
+.\.venv\Scripts\python.exe -m filtering_training.modeling.run_relevance_mixture `
+  --allow-candidate-labels `
+  --output filtering_training/outputs/runs/relevance-mixture-study-next
+```
+
+기존 출력은 덮어쓰지 않는다. 실행 전에 `plan.json`에 0/5/10%, 시드42, 유망 설정 판단과 추가 시드43/44, 같은 학습 조건 및 채택 계약을 고정한다. 기준0% 및 모델03에 대한 개발 조건을 모두 통과하고 전체 정답이나 창 충돌 정답이 개선된 설정만 유망하다고 본다. 유망 설정 중 정확도·macro F1·낮은 MAE 순으로 선택하고 동률이면 낮은 비중을 우선한다. 가장 유망한 설정과 기준0%만 시드43/44로 추가 실행한다. 유망 설정이 없으면 추가 시드를 실행하지 않는다.
+
+`mixtures.json`과 각 `run_config.json`에 그룹별 행 수·시나리오 수·총비중·실제 행 가중치·평균·가중치 지문을 저장한다. 필요하면 단일 실행의 `--base-group-shares <JSON>`으로 기준 출처별 총비중을 명시할 수 있다. JSON은 기존 모든 출처를 양수로 포함하고 합이 1이어야 한다. 이번 비교에서는 해당 비중도 고정해 신규 대비 비중 외의 변경을 섞지 않는다. `--no-origin-balance`와 혼합 비중 설정은 함께 사용할 수 없다.
+
+실행별 모델·에폭 예측·선택 결과는 연구 폴더 하위에 모으며 `screening.json`, `results.json`, `summary.json`에 단일 시드 비교와 반복 시드 평균·범위·표준편차·쌍별 채택 조건을 저장한다. 실제 실행 코드는 `executed-code/`에 보존한다. 단일 시드의 개선만으로 일반화나 배포를 확정하지 않는다. 새 실제 개발·최종 평가 자료가 없다는 한계도 유지한다.
 
 ### 실제 평가 자료와 모델 채택 조건
 

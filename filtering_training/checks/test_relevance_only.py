@@ -104,7 +104,7 @@ class RelevanceOnlyTests(unittest.TestCase):
             result = train_epoch(model, tokenizer(), records, optimizer=optimizer, scheduler=scheduler,
                                  scaler=torch.amp.GradScaler('cuda', enabled=False), weights=torch.ones(1),
                                  seed=42, device='cpu', effective_batch=4, micro_batch=micro,
-                                 row_weights=[1., 3., 1., 2., 1., 2.])
+                                 row_weights=[0., 3., 1., 2., 1., 2.])
             self.assertEqual(result['successful_updates'], 2)
         self.assertTrue(torch.allclose(small.embedding.weight, large.embedding.weight, atol=1e-7))
         outputs = predict_logits(small, tokenizer(), [r[0] for r in records], device='cpu', batch_size=2)

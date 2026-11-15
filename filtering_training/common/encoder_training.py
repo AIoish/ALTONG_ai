@@ -61,8 +61,8 @@ def train_epoch(model, tokenizer, records, *, optimizer, scheduler, scaler, weig
     if not records or not 0 < micro_batch <= effective_batch:
         raise ValueError('nonempty records and valid batch sizes required')
     if row_weights is not None and (len(row_weights) != len(records) or
-            any(not 0 < float(weight) < float('inf') for weight in row_weights)):
-        raise ValueError('one positive finite weight per record required')
+            any(not 0 <= float(weight) < float('inf') for weight in row_weights) or sum(row_weights) <= 0):
+        raise ValueError('finite nonnegative sample weights with positive total required')
     model.train()
     order = list(range(len(records)))
     random.Random(seed).shuffle(order)

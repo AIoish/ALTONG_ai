@@ -14,6 +14,7 @@ from filtering_training.common.artifact_io import ROOT, created_date, digest, lo
 from filtering_training.common.encoder_input import INPUT_SCHEMA, encode_checked, input_text
 from filtering_training.common.encoder_model import build_encoder
 from filtering_training.common.encoder_training import classification_metrics, predict_logits, train_epoch
+from filtering_training.common.relevance_mixture import mixture_weights
 from filtering_training.preparation.curate_relevance import write_lines
 from filtering_training.quality.verify_relevance_experiment import verify
 
@@ -123,8 +124,23 @@ def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False):
                   ROOT / 'filtering_training/common/encoder_training.py',
                   ROOT / 'filtering_training/common/encoder_input.py',
                   ROOT / 'filtering_training/common/relevance_policy.py',
+                  ROOT / 'filtering_training/common/relevance_mixture.py',
                   ROOT / 'filtering_training/quality/verify_relevance_experiment.py')}}
     return rows, encoded, tokenizer, config
+
+
+def configure_mixture(rows, config, reference, supplement_share, *, base_shares=None):
+    reference = Path(reference).resolve()
+    verify(reference, write_report=False)
+    frozen = load_lines(reference / 'relevance/train.jsonl')
+    expected = load_lines(reference / 'relevance/validation.jsonl')
+    if [(r['id'],r['state'],r['score']) for r in rows['validation']] != [(r['id'],r['state'],r['score']) for r in expected]:
+        raise ValueError('mixture study validation must match frozen reference')
+    weights, report = mixture_weights(rows['train'], frozen, supplement_share, base_shares=base_shares)
+    for name in ('manifest.json','relevance/train.jsonl','relevance/validation.jsonl'):
+        config['protected_hashes'][str(reference/name)] = digest(reference/name)
+    config.update(row_loss_weights=weights, training_mixture=report, mixture_reference=str(reference))
+    return report
 
 
 def assert_protected(config):
@@ -185,9 +201,11 @@ def train(run, rows, encoded, tokenizer, config, settings):
     scaler = torch.amp.GradScaler('cuda', enabled=device.startswith('cuda'))
     records = [(item, 0, row['score'] - 1) for item, row in zip(encoded['train'], rows['train'])]
     weights = torch.ones(1, device=device)
-    by_origin = origin_weights(rows['train']) if settings['balance_origins'] else {}
-    row_weights = [by_origin[row['experiment'].get('loss_origin', row['experiment']['origin'])]
-                   for row in rows['train']] if by_origin else None
+    by_origin = origin_weights(rows['train']) if settings['balance_origins'] and 'training_mixture' not in config else {}
+    row_weights = config.get('row_loss_weights')
+    if row_weights is None:
+        row_weights = [by_origin[row['experiment'].get('loss_origin', row['experiment']['origin'])]
+                       for row in rows['train']] if by_origin else None
     run.mkdir(parents=True)
     tokenizer.save_pretrained(run / 'tokenizer')
     model.encoder.config.save_pretrained(run / 'encoder')
@@ -290,6 +308,9 @@ def main():
     parser.add_argument('--micro-batch', type=int, default=DEFAULTS['micro_batch'])
     parser.add_argument('--seed', type=int, default=DEFAULTS['seed'])
     parser.add_argument('--no-origin-balance', action='store_true')
+    parser.add_argument('--mixture-reference', type=Path)
+    parser.add_argument('--supplement-share', type=float)
+    parser.add_argument('--base-group-shares', type=Path)
     args = parser.parse_args()
     if args.action == 'evaluate':
         if not args.run:
@@ -304,9 +325,16 @@ def main():
     if not args.dry_run and args.run is None:
         parser.error('--run is required for training')
     rows, encoded, tokenizer, config = prepare(args.dataset_dir, args.base, allow_candidates=args.allow_candidate_labels)
+    if args.mixture_reference is not None or args.supplement_share is not None:
+        if args.mixture_reference is None or args.supplement_share is None or args.no_origin_balance:
+            parser.error('mixture reference and share required together; do not combine with no-origin-balance')
+        configure_mixture(rows, config, args.mixture_reference, args.supplement_share,
+                          base_shares=read(args.base_group_shares) if args.base_group_shares else None)
+    elif args.base_group_shares:
+        parser.error('base group shares require mixture mode')
     if args.dry_run:
         summary = {k: config[k] for k in ('input_schema', 'output_classes', 'candidate_labels_used', 'train_rows', 'validation_rows', 'maximum_tokens', 'urgency_model_loaded', 'final_test_used')}
-        print(json.dumps(dict(summary, status='dry_run_passed', settings=settings), ensure_ascii=False, indent=2))
+        print(json.dumps(dict(summary, status='dry_run_passed', settings=settings, training_mixture=config.get('training_mixture')), ensure_ascii=False, indent=2))
     else:
         train(args.run, rows, encoded, tokenizer, config, settings)
 
