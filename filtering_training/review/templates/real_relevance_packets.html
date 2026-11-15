@@ -49,7 +49,7 @@ function render(){
  const container=document.getElementById('cards');container.replaceChildren();
  for(const c of selected){
   const card=el('article',undefined,'card'+(valid(answers[c.case_id]?.score)?' answered':''));
-  const head=el('div',undefined,'cardhead');head.append(el('h2',c.case_id+'. '+c.title),el('span',c.suggested_score===null?'제안: 보류':'내 제안: '+c.suggested_score+'점','badge'));card.append(head);
+  const head=el('div',undefined,'cardhead');head.append(el('h2',c.case_id+'. '+c.title));if(!packet.blind)head.append(el('span',c.suggested_score===null?'제안: 보류':'내 제안: '+c.suggested_score+'점','badge'));card.append(head);
   card.append(el('p',c.question),el('p',c.ambiguity,'why'));
   card.append(el('p','적용할 원본 번호: '+c.members.map(m=>m.source_number).join(', '),'muted'));
   for(const m of c.members){
@@ -65,12 +65,13 @@ function render(){
    const labelNode=el('label',undefined,'option'),input=el('input');input.type='radio';input.name='score-'+c.case_id;input.value=value;input.checked=answers[c.case_id]?.score===value;input.onchange=()=>setAnswer(c.case_id,value);labelNode.append(input,el('strong',label),el('small',description));opts.append(labelNode);
   }card.append(opts);
   const actions=el('div',undefined,'actions');const keep=el('button',c.suggested_score===null?'보류로 선택':'제안 '+c.suggested_score+'점 선택');keep.onclick=()=>setAnswer(c.case_id,c.suggested_score===null?'hold':String(c.suggested_score));
-  const clear=el('button','선택 해제');clear.onclick=()=>{answers[c.case_id]={score:null,note:answers[c.case_id]?.note||''};save();render();};actions.append(keep,clear);card.append(actions);
+  const clear=el('button','선택 해제');clear.onclick=()=>{answers[c.case_id]={score:null,note:answers[c.case_id]?.note||''};save();render();};if(!packet.blind)actions.append(keep);actions.append(clear);card.append(actions);
   const note=el('textarea');note.placeholder='메모는 필요할 때만 적어 줘.';note.setAttribute('aria-label',c.case_id+' 메모');note.value=answers[c.case_id]?.note||'';note.oninput=()=>{answers[c.case_id]={score:answers[c.case_id]?.score||null,note:note.value};save();};card.append(note);container.append(card);
  }updateReply();
 }
-document.getElementById('overview').textContent='전체 '+packet.total_source_rows+'건 중 경계 사례 '+packet.selected_source_rows+'건을 '+packet.cases.length+'개 카드로 묶었어. 이미 보류한 모의 생성기 '+packet.previously_held_rows+'건은 다시 묻지 않을게.';
-document.getElementById('accept-round').onclick=()=>{for(const c of packet.cases.filter(c=>c.round===round)){if(!valid(answers[c.case_id]?.score))answers[c.case_id]={score:c.suggested_score===null?'hold':String(c.suggested_score),note:answers[c.case_id]?.note||''};}save();render();};
+document.getElementById('overview').textContent=packet.blind?'실제 알림 '+packet.selected_source_rows+'건을 예측·제안 점수 없이 검수해 줘.':'전체 '+packet.total_source_rows+'건 중 경계 사례 '+packet.selected_source_rows+'건을 '+packet.cases.length+'개 카드로 묶었어. 이미 보류한 모의 생성기 '+packet.previously_held_rows+'건은 다시 묻지 않을게.';
+document.getElementById('accept-round').hidden=!!packet.blind;
+document.getElementById('accept-round').onclick=()=>{if(packet.blind)return;for(const c of packet.cases.filter(c=>c.round===round)){if(!valid(answers[c.case_id]?.score))answers[c.case_id]={score:c.suggested_score===null?'hold':String(c.suggested_score),note:answers[c.case_id]?.note||''};}save();render();};
 document.getElementById('copy').onclick=async()=>{const text=document.getElementById('reply').value;if(!text){document.getElementById('status').textContent='점수 또는 보류를 먼저 골라 줘.';return;}try{await navigator.clipboard.writeText(text);document.getElementById('status').textContent='복사했어. 채팅에 붙여넣으면 돼.';}catch(e){const box=document.getElementById('reply');box.focus();box.select();document.getElementById('status').textContent='선택된 답변을 Ctrl+C로 복사해 줘.';}};
 document.getElementById('download').onclick=()=>{const chosen={};for(const c of packet.cases){const a=answers[c.case_id];if(valid(a?.score))chosen[c.case_id]={score:a.score==='hold'?null:Number(a.score),note:a.note||''};}if(!Object.keys(chosen).length){document.getElementById('status').textContent='선택한 답변이 없어.';return;}const blob=new Blob([JSON.stringify({packet_id:packet.packet_id,answers:chosen},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download='relevance-review-answers.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);document.getElementById('status').textContent='선택한 답변만 JSON으로 저장했어.';};
 render();

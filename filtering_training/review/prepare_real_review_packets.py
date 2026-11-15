@@ -29,7 +29,7 @@ def build_packet(rows, plan):
     cases, seen, ids = [], set(), set()
     for spec in plan['cases']:
         case = deepcopy(spec)
-        if case['case_id'] in ids or case['round'] not in (1, 2, 3):
+        if case['case_id'] in ids or type(case['round']) is not int or case['round'] < 1:
             raise ValueError('duplicate case or invalid round')
         ids.add(case['case_id'])
         members = []
@@ -47,13 +47,13 @@ def build_packet(rows, plan):
         scores = {by_number[m['source_number']]['score'] for m in members}
         if len(scores) != 1:
             raise ValueError('grouped sources must share proposed score')
-        case.update(members=members, suggested_score=scores.pop())
+        case.update(members=members, suggested_score=None if plan.get('blind') else scores.pop())
         cases.append(case)
     held = sum(row['review'].get('reason_code') == plan['previously_held_reason'] for row in rows)
     packet = {'purpose': 'Private local relevance review; unanswered cases are not approvals',
               'created_date': created_date(), 'total_source_rows': len(rows),
               'selected_source_rows': len(seen), 'previously_held_rows': held,
-              'remaining_unselected_rows': len(rows) - len(seen) - held, 'cases': cases}
+              'remaining_unselected_rows': len(rows) - len(seen) - held, 'cases': cases, 'blind': bool(plan.get('blind'))}
     packet['packet_id'] = key(packet)
     return packet
 
@@ -71,6 +71,13 @@ def prepare(folder, plan_path, batch='user-packets-01'):
     packet.pop('packet_id')
     packet['source_proposals_sha256'] = digest(source / 'proposed.jsonl')
     packet['packet_id'] = key(packet)
+    return write_packet(output, packet, plan_sha256=digest(plan_path), source=str(source))
+
+
+def write_packet(output, packet, **metadata):
+    output = Path(output)
+    if output.exists():
+        raise ValueError('preserve previous review packet')
     output.mkdir(parents=True)
     write(output / 'packet.json', packet)
     payload = json.dumps(packet, ensure_ascii=False).replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e')
@@ -79,17 +86,17 @@ def prepare(folder, plan_path, batch='user-packets-01'):
         raise ValueError('expected one packet placeholder')
     (output / '검수하기.html').write_text(template.replace('__PACKET_JSON__', payload), encoding='utf-8')
     lines = ['<!-- 용도: 실제 알림 경계 사례 검수 카드. 생성일: ' + created_date() + ' -->',
-             '# 관련도 검수', '', '먼저 1차 A~F만 검수. 답변: `A=2, B=3, C=보류`.',
+             '# 관련도 검수', '', ('각 카드에서 점수 또는 보류를 직접 선택해 줘. 예측·제안 점수는 표시하지 않아.' if packet.get('blind') else '먼저 1차 A~F만 검수. 답변: `A=2, B=3, C=보류`.'),
              '1=무관, 2=일부 연결·도움 불명확, 3=현재 작업에 유용. 미응답은 승인되지 않음.', '']
     with (output / '카드목록.csv').open('w', encoding='utf-8-sig', newline='') as stream:
         writer = csv.writer(stream)
         writer.writerow(['카드', '묶음', '원본 번호', '판단할 내용', '제안', '내 점수', '메모'])
         for case in packet['cases']:
-            suggestion = case['suggested_score'] if case['suggested_score'] is not None else '보류'
+            suggestion = '' if packet.get('blind') else case['suggested_score'] if case['suggested_score'] is not None else '보류'
             numbers = ', '.join(m['source_number'] for m in case['members'])
             writer.writerow([case['case_id'], case['round'], numbers, case['question'], suggestion, '', ''])
             lines += [f"## {case['round']}차 {case['case_id']}. {case['title']}", '',
-                      case['question'], '', f"내 제안: **{suggestion}** · {case['ambiguity']}", '']
+                      case['question'], '', (case['ambiguity'] if packet.get('blind') else f"내 제안: **{suggestion}** · {case['ambiguity']}"), '']
             for m in case['members']:
                 n, c = m['state']['notification'], m['state']['context']
                 lines += [f"원본 {m['source_number']} · {m['received_kst']} KST", '',
@@ -101,7 +108,7 @@ def prepare(folder, plan_path, batch='user-packets-01'):
     (output / '검수카드.md').write_text('\n'.join(lines), encoding='utf-8')
     write(output / 'manifest.json', {'purpose': 'Local private review cards; no labels changed',
           'created_date': created_date(), 'packet_id': packet['packet_id'],
-          'plan_sha256': digest(plan_path), 'source': str(source), 'training_ready': False,
+          **metadata, 'training_ready': False,
           'files': {p.name: {'sha256': digest(p)} for p in output.iterdir() if p.is_file()}})
     return output
 

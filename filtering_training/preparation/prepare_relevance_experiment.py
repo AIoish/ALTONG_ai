@@ -41,7 +41,7 @@ class Groups:
         self.parents[max(a, b)] = min(a, b)
 
 
-def group_rows(rows, *, similarity=0.92):
+def group_rows(rows, *, similarity=0.92, reaction_predicate=context_only_reaction):
     """Link provenance, exact/core bodies, model inputs and high character similarity.
 
     Similarity is only a leakage precaution, never a reason to change a label.
@@ -56,7 +56,7 @@ def group_rows(rows, *, similarity=0.92):
             else:
                 tokens[token] = i
         body = normalized(core_body(row['state']['notification']['body']))
-        if body and not context_only_reaction(row['state']['notification']['body']):
+        if body and not reaction_predicate(row['state']['notification']['body']):
             bodies[body].append(i)
     for indices in bodies.values():
         for i in indices[1:]:
@@ -250,6 +250,8 @@ def load_sources(balanced, pilot, real, *, reviewed=None, protected=None):
     sources, excluded = [], []
     for name, path in [('balanced', balanced), ('pilot', pilot), ('real', real)]:
         for original in load_lines(path):
+            if original.get('split') in ('real_development', 'real_final'):
+                raise ValueError('evaluation-only rows cannot enter training source preparation')
             row = deepcopy(original)
             if row['score'] is None:
                 excluded.append({'id': row['id'], 'origin': name, 'reason': row['review']['reason_code']})

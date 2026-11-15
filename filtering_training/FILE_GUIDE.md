@@ -1,5 +1,9 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-15: `quality/relevance_evaluation.py`는 자료 사용 이력·사용자 확정 채택 조건·동일 자료 비교를 관리한다.
+> `preparation/prepare_real_evaluation.py`는 새 수집의 세션별 평가 분할·예측 비공개 검수를 준비하며 기존 검수 UI와 답변 처리기를 재사용한다.
+> 실제 개발 평가와 최종 평가 자료는 아직 확보·검수되지 않았다.
+
 > 2026-11-15: 대상 없는 반응 정책은 `common/relevance_policy.py`, 원본 보존 이관·저장 예측 재채점은
 > `preparation/migrate_relevance_policy.py`가 담당한다. 학습 기본 후보는 v21의 `baseline`이며 이번 단계에서는 재학습하지 않았다.
 
