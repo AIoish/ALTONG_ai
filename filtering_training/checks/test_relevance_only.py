@@ -57,7 +57,7 @@ class RelevanceOnlyTests(unittest.TestCase):
         self.assertNotIn('urgency', report)
         better_f1 = dict(report, macro_f1=.9, exact_accuracy=.4)
         better_accuracy = dict(report, macro_f1=.8, exact_accuracy=.8)
-        self.assertGreater(rank(better_f1), rank(better_accuracy))
+        self.assertGreater(rank(better_accuracy), rank(better_f1))
         self.assertNotIn('score', __import__('json').loads(input_text(rows[0]['state'], 'relevance')))
         for predictions in ([1, 2], [1, True, 3], [1, 2, 4]):
             with self.assertRaises(ValueError):
@@ -68,12 +68,12 @@ class RelevanceOnlyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check_settings(dict(DEFAULTS, **change))
 
-    def test_equal_source_selection_does_not_hide_new_scenario_regression(self):
+    def test_exact_score_selection_and_origin_loss_weights_are_separate(self):
         a = {'macro_f1': .99, 'exact_accuracy': .99, 'mae': .01,
              'by_origin': {'balanced': {'macro_f1': 1.}, 'pilot': {'macro_f1': .5}}}
         b = {'macro_f1': .98, 'exact_accuracy': .98, 'mae': .02,
              'by_origin': {'balanced': {'macro_f1': .98}, 'pilot': {'macro_f1': .8}}}
-        self.assertGreater(rank(b), rank(a))
+        self.assertGreater(rank(a), rank(b))
         rows = [row(i, 1) for i in range(10)]
         rows[0]['experiment']['origin'] = 'real'
         weights = origin_weights(rows)

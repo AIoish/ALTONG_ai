@@ -50,9 +50,8 @@ def evaluate(rows, scores):
 
 
 def rank(report):
-    # Each source gets one vote; 926 template rows must not drown out fresh cases.
-    origin_mean = sum(r['macro_f1'] for r in report['by_origin'].values()) / len(report['by_origin'])
-    return origin_mean, report['macro_f1'], report['exact_accuracy'], -report['mae']
+    # User-confirmed priority: exact 1/2/3 scores; deployment adoption is a separate gate.
+    return report['exact_accuracy'], report['macro_f1'], -report['mae']
 
 
 def origin_weights(rows):
@@ -115,7 +114,7 @@ def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False):
               'maximum_tokens': maximum, 'truncated_rows': 0, 'training_ready_promoted': False,
               'loss': 'class-unweighted three-class CE; optional mean-one origin sample weights; score minus one',
               'pooling': 'first token', 'full_encoder_training': True, 'urgency_model_loaded': False,
-              'checkpoint_selection': 'mean source macro F1, then overall macro F1, accuracy, lower MAE; earliest tie',
+              'checkpoint_selection': 'exact score accuracy, macro F1, lower MAE; earliest tie; separate adoption gate',
               'final_test_used': False, 'validation_is_independent_final_test': False,
               'majority_baseline': {'score': majority, 'validation': evaluate(rows['validation'], [majority] * len(rows['validation']))},
               'data_verification': verification, 'protected_hashes': protected,
