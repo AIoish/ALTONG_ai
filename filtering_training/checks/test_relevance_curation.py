@@ -6,7 +6,7 @@ from copy import deepcopy
 import re
 import unittest
 
-from filtering_training.generation.prepare_relevance_diversity import make_drafts, validate_drafts
+from filtering_training.generation.prepare_relevance_diversity import make_drafts, make_context_priority_drafts, validate_drafts
 from filtering_training.preparation.curate_relevance import body_group, curate
 from filtering_training.quality.audit_relevance_diversity import template_report
 
@@ -154,6 +154,34 @@ class RelevanceCurationTests(unittest.TestCase):
         self.assertEqual(row['state']['context']['recent_windows'], [])
         self.assertEqual(row['score'], 2)
         self.assertEqual(row['review_status'], 'ai_proposed_unreviewed')
+
+    def test_priority_supplement_preserves_old_rows_and_uses_training_only_candidates(self):
+        old = make_drafts()
+        expanded = make_drafts(context_priority=True)
+        self.assertEqual(expanded[:len(old)], old)
+        extra = expanded[len(old):]
+        self.assertEqual(extra, make_context_priority_drafts())
+        self.assertEqual(len(extra), 168)
+        self.assertEqual(len({r['scenario'] for r in extra}), 8)
+        self.assertTrue(all(r['training_only'] and r['review_status'] == 'ai_proposed_unreviewed' for r in extra))
+        validate_drafts(expanded)
+
+    def test_priority_contrasts_keep_notification_and_app_pairs_identical(self):
+        rows = make_context_priority_drafts()
+        for scenario in {r['scenario'] for r in rows}:
+            selected = [r for r in rows if r['scenario'] == scenario]
+            for app in {r['state']['notification']['app_name'] for r in selected}:
+                by_kind = {r['case_kind']: r for r in selected if r['state']['notification']['app_name'] == app}
+                target = by_kind['matched_current']['state']['notification']
+                for kind, score in [('matched_current_other_history', 3), ('current_history_conflict', 1),
+                                    ('clear_other_current_without_history', 1), ('history_resolves_ambiguous_current', 3)]:
+                    self.assertEqual(by_kind[kind]['state']['notification'], target)
+                    self.assertEqual(by_kind[kind]['score'], score)
+            for kind in {r['case_kind'] for r in selected}:
+                group = [deepcopy(r['state']) for r in selected if r['case_kind'] == kind]
+                for state in group:
+                    state['notification'].pop('app_name')
+                self.assertEqual(group, [group[0]] * 3)
 
     def test_validation_rejects_duplicate_inputs_and_group_leakage(self):
         rows = make_drafts()

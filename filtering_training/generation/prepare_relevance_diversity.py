@@ -107,7 +107,66 @@ DISTRACTORS = (
 )
 
 
-def make_drafts():
+def make_context_priority_drafts():
+    # New tasks only: inspected validation examples never become training variants.
+    scenarios = (
+        ('audio_peak', 'Audacity.exe', '낭독 녹음 — 마지막 문장 소리 깨짐 복구', '낭독 녹음 편집',
+         '낭독 마지막 문장의 찢어지는 소리를 복구한 음원 첨부했어.',
+         '낭독 녹음하는 사람들은 목 풀 때 무슨 차 마시나 궁금해', '관리실에서 주차 스티커 받으래'),
+        ('bike_brake', 'chrome.exe', '자전거 앞 브레이크 패드 호환 규격 조사', '자전거 수리',
+         '확인하던 앞 브레이크 모델에는 R형 패드가 맞는대. 호환표 가져왔어.',
+         '요즘 자전거 브레이크 레버 색깔도 다양하네', '귤 한 상자 주문했어'),
+        ('ceramic_glaze', 'EXCEL.EXE', '도자기 유약별 가마 온도 기록 대조.xlsx', '도자기 실험 기록',
+         '유약 7번 시편의 가마 온도가 잘못 적혀 있었어. 실제 온도 기록표 보냈어.',
+         '도자기 유약 이름들은 향수 이름 같더라', '내일 쓰레기 수거 시간이 달라진대'),
+        ('museum_ramp', 'Acrobat.exe', '전시장 경사로 휠체어 통과 폭 확인.pdf', '전시장 접근성 점검',
+         '동쪽 경사로 폭은 손잡이 안쪽 기준 110cm야. 실측 사진 붙였어.',
+         '전시장 경사로가 나오는 사진은 구도가 재밌어', '새로 생긴 빵집 가 봤어?'),
+        ('garden_frost', 'Notion.exe', '옥상 텃밭 야간 서리 대비 덮개 배치', '텃밭 월동 준비',
+         '밤 기온을 반영해 옥상 텃밭 덮개를 두 겹으로 배치한 도면 보냈어.',
+         '요즘 텃밭 사진만 보면 봄이 기다려져', '책장 조립에 쓰던 망치 어디 뒀어?'),
+        ('font_fallback', 'Code.exe', 'fallback.css — 아랍어 글리프 대체 폰트 설정', '다국어 글꼴 적용',
+         '아랍어 글리프가 네모로 나오던 원인을 찾았어. 대체 폰트 목록 패치 보낼게.',
+         '다국어 글꼴 견본을 모아 보면 전시회 같아', '이번 주 수영장 임시 휴장한대'),
+        ('recipe_yield', 'WINWORD.EXE', '단체 급식 수프 60인분 환산 검토.docx', '급식 레시피 검토',
+         '수프를 60인분으로 늘릴 때 소금은 비례 계산보다 줄여야 해. 시식 후 조정표 공유해.',
+         '수프 레시피 책 표지는 왜 다 따뜻한 색이지', '택배 상자 재활용장에 가져다 놨어'),
+        ('telescope_mount', 'FreeCAD.exe', '관측 장비 삼각대 체결 어댑터 간섭 확인', '망원경 거치대 제작',
+         '삼각대 체결 어댑터에서 나사가 닿던 부위를 2mm 깎은 도면 올렸어.',
+         '망원경 거치대 조립 영상은 시간 가는 줄 모르겠어', '주말 합창 연습 장소가 바뀌었어'),
+    )
+    rows = []
+    for index, (family, process, window, title, useful, topic, unrelated) in enumerate(scenarios):
+        other = scenarios[(index + 3) % len(scenarios)]
+        current, history = (process, window), [{'app_name': process, 'window_title': window}]
+        other_current = (other[1], other[2])
+        other_history = [{'app_name': other[1], 'window_title': other[2]}]
+        specs = (
+            ('matched_current', 3, useful, current, []),
+            ('matched_current_other_history', 3, useful, current, other_history),
+            ('current_history_conflict', 1, useful, other_current, history),
+            ('clear_other_current_without_history', 1, useful, other_current, []),
+            ('history_resolves_ambiguous_current', 3, useful, (process, '제목 없음'), history),
+            ('topic_without_direct_help', 2, topic, current, other_history),
+            ('unrelated_notification', 1, unrelated, current, other_history),
+        )
+        for kind, score, body, active, recent in specs:
+            for app in ('KakaoTalk.exe', 'Slack', 'Discord.exe'):
+                state = {'notification': {'app_name': app, 'sender': '협업 담당', 'title': title,
+                         'body': body, 'timestamp': f'2026-11-15T{index:02d}:00:00Z'},
+                         'context': {'active_process': active[0], 'window_title': active[1],
+                                     'recent_windows': deepcopy(recent)}}
+                rows.append({'id': f'priority_{family}_{kind}_{app}', 'group_id': 'priority_' + family,
+                    'scenario': 'priority_' + family, 'split': 'unassigned', 'state': state, 'score': score,
+                    'case_kind': kind, 'training_only': True, 'review_status': 'ai_proposed_unreviewed',
+                    'reason': ('명확한 현재 작업을 우선하며, 모호할 때만 구체적 최근 창으로 보완; '
+                               '같은 주제의 잡담은 2점, 작업용 결과는 3점, 다른 현재 작업의 알림은 1점'),
+                    'provenance': {'origin': 'authored_synthetic', 'real_user_data': False,
+                                   'purpose': 'training-only current/history contrast; assistant-applied confirmed policy'}})
+    return rows
+
+
+def make_drafts(*, context_priority=False):
     rows, counters = [], Counter()
 
     def add(scenario, score, body, kind, *, current=None, history=None, title=None, group=None):
@@ -214,6 +273,8 @@ def make_drafts():
         add(scenario, 3, scenario['messages'][3], 'history_resolves_ambiguous_current',
             current=(scenario['process'], '제목 없음'),
             history=[{'app_name': scenario['process'], 'window_title': scenario['window']}])
+    if context_priority:
+        rows.extend(make_context_priority_drafts())
     return rows
 
 
@@ -262,7 +323,7 @@ def review_markdown(rows):
     return '\n'.join(lines)
 
 
-def prepare(output=OUTPUT, batch_name=None):
+def prepare(output=OUTPUT, batch_name=None, *, context_priority=False):
     output = Path(output).resolve()
     parent = read(output / 'manifest.json')
     if parent.get('status') != 'review_pending' or parent.get('input_schema') != INPUT_SCHEMA:
@@ -284,7 +345,7 @@ def prepare(output=OUTPUT, batch_name=None):
     for path in (source_dir / 'evaluation').glob('*.jsonl'):
         protected[str(path)] = digest(path)
         heldout.update(body_group(r['notification']['body']) for r in load_lines(path))
-    rows = make_drafts()
+    rows = make_drafts(context_priority=context_priority)
     validate_drafts(rows)
     if any(body_group(r['state']['notification']['body']) in old_training | heldout for r in rows):
         raise ValueError('new body exactly overlaps training or held-out data')
@@ -299,6 +360,7 @@ def prepare(output=OUTPUT, batch_name=None):
                 'created_date': created_date(), 'status': 'ai_proposed_unreviewed', 'input_schema': INPUT_SCHEMA,
                 'recent_windows_policy': RECENT_WINDOWS_POLICY, 'rows': len(rows), 'profile': profile(rows),
                 'case_counts': dict(Counter(r['case_kind'] for r in rows)),
+                'training_only_rows': sum(r.get('training_only', False) for r in rows),
                 'policy_confirmation': {'same_topic_without_direct_help': {'score': 2, 'status': 'user_confirmed'},
                                         'insufficient_evidence': {'score': 1, 'status': 'proposal_pending_review'},
                                         'clear_current_over_conflicting_history': {'status': 'user_confirmed'},
@@ -324,5 +386,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, default=OUTPUT)
     parser.add_argument('--batch-name')
+    parser.add_argument('--context-priority', action='store_true')
     args = parser.parse_args()
-    prepare(args.output_dir, args.batch_name)
+    prepare(args.output_dir, args.batch_name, context_priority=args.context_priority)

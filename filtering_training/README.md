@@ -45,6 +45,32 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 
 ### 평가와 저장
 
+현재 창 우선 보강 실험은 기본 v19를 덮어쓰지 않고 `outputs/v20_relevance_current_priority_01`로 준비한다. 기존 4,964행의 입력·점수·분할을 유지하며, 새로운 작업 8종·본문 24종의 통제된 대비 168행을 학습 쪽에만 추가한다. 알림 본문을 유지하고 현재·최근 창 관계를 바꾼 사례와 앱만 바꾼 사례이며, 168개의 독립 작업을 뜻하지 않는다. 단문 라벨은 추가하거나 확대하지 않는다. 신규 합성 점수는 기존 사용자 기준을 적용한 AI 제안이며 사용자 개별 검수 정답으로 취급하지 않는다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.generation.prepare_relevance_diversity `
+  --batch-name current-priority-v4 --context-priority
+
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_relevance_experiment `
+  --pilot filtering_training/outputs/v14_relevance_curation_01/new/current-priority-v4/candidates.jsonl `
+  --real filtering_training/outputs/v16_real_relevance_review_01/review/user-review-round-02-03/proposed.jsonl `
+  --reviewed-probes filtering_training/outputs/_maintenance/reaction-audit-2026-11-12/reviewed-01/probes.jsonl `
+  --reference filtering_training/outputs/v19_relevance_reviewed_reactions_01 `
+  --output-dir filtering_training/outputs/v20_relevance_current_priority_01
+
+.\.venv\Scripts\python.exe -m filtering_training.modeling.relevance_only `
+  --dry-run --allow-candidate-labels `
+  --dataset-dir filtering_training/outputs/v20_relevance_current_priority_01
+
+.\.venv\Scripts\python.exe -m filtering_training.modeling.relevance_only `
+  --allow-candidate-labels --dataset-dir filtering_training/outputs/v20_relevance_current_priority_01 `
+  --run filtering_training/outputs/runs/2026-11-15-klue-relevance-only-04
+```
+
+`training_only=true`는 후보 생성 기록이며, 공통 분할 경로에서 `experiment.train_only`로 전달해 시나리오 전체를 학습에 둔다. 원본 v19 검증 입력은 학습에 복사하지 않으며, 기존 그룹·본문·근접 문장 누출 검사를 그대로 적용한다. 같은 자료의 전체 검증·창 충돌·모호한 현재 창·단문 진단을 함께 비교한 뒤 모델 채택을 판단한다. 실험 실행이 기본 데이터나 앱 모델을 자동으로 바꾸지는 않는다.
+
+2026-11-15 실행 결과 창 충돌은 4/8→8/8로 개선됐지만, 선택 모델의 전체 정답이 975/985→956/985로 후퇴해 모델 교체 후보로 채택하지 않았다. 기본 v19와 기존 모델 03을 유지한다. 에폭별 결과·단문과 전체 검증의 앱 민감도 차이는 기존 실험 기록에 남겼다.
+
 체크포인트는 출처별 macro F1의 단순 평균을 먼저 보고, 전체 macro F1·정확도·낮은 MAE 순으로 선택한다. 큰 기존 문장 계열이 새 시나리오의 퇴보를 가리지 않게 출처를 동등하게 평가한다. 완전히 같으면 이전 체크포인트를 유지하고, 두 번 연속 개선이 없으면 중단한다. 긴급도 정답이나 통과 정책은 모델 선택에 사용하지 않는다.
 
 정확도·macro F1·MAE·1~3 혼동행렬, 3점 누락과 오탐 ID, 데이터 출처별 지표를 저장한다. 학습 분포의 최다 클래스를 항상 예측하는 기준선도 같은 검증 자료로 계산한다. 유형별 지표와 단문 대비 쌍의 점수 일관성·정답 일치도 함께 기록한다. 매 에폭 예측과 오답에는 원래 ID·점수·확률·그룹·출처를 남긴다. 자료가 들어 있는 출력은 Git 제외 대상이다.
@@ -69,7 +95,7 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 
 ### 코드 검증
 
-학습 도구 검사 143개와 기존 필터링 검사 35개, 총 178개가 통과했다. 기존 공동 모델의 Encoder·긴급도 헤드 초기화와 RNG 보존, task weight·없는 작업의 zero gradient, 미완성 배치를 포함한 micro batch 누적 등가성, 관련도 헤드 하나만 역전파·저장·복원되는지, 후보 점수 사용 구분과 체크포인트 해시 변경 거부를 확인했다. 실제 v19 자료의 dry-run도 통과했다. 출처별 선택 기준·가중 손실 누적·기존 분할 동결·반응 문자 시나리오 분리 검사도 포함한다.
+학습 도구 검사 150개와 기존 필터링 검사 35개, 총 185개가 통과했다. 기존 공동 모델의 Encoder·긴급도 헤드 초기화와 RNG 보존, task weight·없는 작업의 zero gradient, 미완성 배치를 포함한 micro batch 누적 등가성, 관련도 헤드 하나만 역전파·저장·복원되는지, 후보 점수 사용 구분과 체크포인트 해시 변경 거부를 확인했다. 실제 v19·v20 자료의 dry-run도 통과했다. 출처별 선택 기준·가중 손실 누적·기존 분할 동결·반응 문자 시나리오 분리·현재 창 대비의 학습 전용 분할·진단 입력 단일 요인 변경 검사도 포함한다.
 
 ### 단문 원문 진단
 
@@ -83,6 +109,20 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 ```
 
 기본은 작성한 맥락 8개이며, 개인 맥락은 `--contexts <로컬 JSONL>`로 추가한다. 개인 맥락 파일은 `id`, `scope`, `state`, 선택적 `neutral_score_proposal`·`controls`·`confirmed_examples`를 사용한다. 기존 출력 폴더를 덮어쓰지 않는다. 결과의 `review.csv`와 첫 6개 표현의 `first-review.md`에는 모델 점수를 표시하지 않는다. 작성한 기준 적용 제안과 사용자 확정 예시를 구분하고, 다른 표현·맥락에 답변을 자동 확대하지 않는다. 실제 결과는 기존 실험 기록에만 모은다.
+
+### 고정 검증 입력의 앱·최근 창 민감도
+
+`quality/audit_relevance_context.py`는 같은 검증 행을 여러 관련도 모델에 넣고, 알림 앱만 변경하거나 최근 창만 제거했을 때 점수가 바뀌는지 비교한다. 단문 진단과 달리 기존 검증 전체의 긴 알림도 포함한다. 원본 입력만 기존 후보 정답과 비교하며, 변형 입력에는 정답을 복사하지 않는다. 최근 창이 필요한 사례는 제거 후 정답 자체가 바뀔 수 있으므로 점수 변화를 곧 오답으로 해석하지 않는다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.quality.audit_relevance_context `
+  --rows filtering_training/outputs/v19_relevance_reviewed_reactions_01/relevance/validation.jsonl `
+  --run filtering_training/outputs/runs/2026-11-11-klue-relevance-only-02 `
+        filtering_training/outputs/runs/2026-11-12-klue-relevance-only-03 `
+  --output-dir filtering_training/outputs/_maintenance/context-sensitivity-new
+```
+
+같은 원본 앱으로 바꾸거나 실제 입력에 최근 창이 없어서 변화가 없는 경우는 비교에서 제외한다. `model-*.cases.jsonl`에 원본 정답 일치·앱별 점수·최근 창 제거 점수를 모으고, `model-*.predictions.jsonl`에 입력 지문·확률을 기록한다. manifest에 원본·체크포인트·코드·결과 해시를 남긴다. 원본은 변경하지 않으며 이전 결과 폴더를 덮어쓰지 않는다. 추론·입력 직렬화·평가 함수는 기존 공통 경로를 사용한다. 이 진단은 신경망 내부 가중치나 독립 최종 성능을 측정하지 않는다.
 
 ## 한국어 Encoder CPU 비교
 

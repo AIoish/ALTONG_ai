@@ -10,7 +10,7 @@ import unittest
 from filtering_training.preparation.curate_relevance import write_lines
 from filtering_training.common.artifact_io import digest, write
 from filtering_training.preparation.prepare_relevance_experiment import (
-    assign_splits, audit_rows, group_rows, prepare, reviewed_examples, verify_splits,
+    assign_splits, audit_rows, group_rows, load_sources, prepare, reviewed_examples, verify_splits,
 )
 
 
@@ -71,6 +71,20 @@ class RelevanceExperimentTests(unittest.TestCase):
                 write(folder / 'manifest.json', {'files': {'probes.jsonl': digest(path)}})
                 with self.assertRaises(ValueError):
                     reviewed_examples(path)
+
+    def test_training_only_pilot_flag_survives_source_loading_and_split(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            paths = [folder / (n + '.jsonl') for n in ('balanced', 'pilot', 'real')]
+            samples = [self.fixture(), [dict(row('priority', 3), scenario='priority', training_only=True)], []]
+            for path, values in zip(paths, samples):
+                write_lines(path, values)
+            sources, _ = load_sources(*paths)
+            priority = next(r for r in sources if r['id'] == 'priority')
+            self.assertTrue(priority['experiment']['train_only'])
+            groups, _ = group_rows(sources)
+            result = assign_splits(sources, groups, fraction=0.49)
+            self.assertEqual(next(r for r in result if r['id'] == 'priority')['split'], 'train')
 
     def test_identical_input_different_label_is_a_conflict(self):
         a = row('a', 1)
