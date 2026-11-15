@@ -1,5 +1,8 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-15: 대상 없는 반응 정책은 `common/relevance_policy.py`, 원본 보존 이관·저장 예측 재채점은
+> `preparation/migrate_relevance_policy.py`가 담당한다. 학습 기본 후보는 v21의 `baseline`이며 이번 단계에서는 재학습하지 않았다.
+
 > 2026-11-13: `quality/audit_relevance_context.py`는 고정 검증 전체에서 알림 앱 변경·최근 창 제거에 따른 예측 민감도를 비교한다.
 > 단문 검수와 구분하며, 모델 읽기·추론·정답 지표는 기존 관련도 전용 코드를 재사용한다.
 
