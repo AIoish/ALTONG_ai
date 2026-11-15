@@ -261,7 +261,7 @@ def load_sources(balanced, pilot, real, *, reviewed=None, protected=None):
                 hints += ['real:whole-capture']
             row['experiment'] = {'origin': name, 'source_file': str(path),
                                  'source_input_sha256': input_key(row), 'group_hints': hints,
-                                 'train_only': name == 'real',
+                                 'train_only': name == 'real' or row.get('training_only') is True,
                                  'label_source': 'user' if row.get('review', {}).get('human_reviewed') else 'assistant',
                                  'label_status': 'candidate_not_independent_gold'}
             sources.append(row)
