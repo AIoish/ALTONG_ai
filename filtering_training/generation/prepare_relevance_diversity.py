@@ -11,6 +11,7 @@ import re
 
 from filtering_training.common.artifact_io import created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_input import INPUT_SCHEMA, RECENT_WINDOWS_POLICY, input_text
+from filtering_training.common.relevance_policy import POLICY, apply_policy
 from filtering_training.preparation.curate_relevance import OUTPUT, body_group, context_only_reaction, key, profile, write_lines
 
 # Hand-authored scenarios, not a Cartesian multiplication of interchangeable nouns.
@@ -318,12 +319,12 @@ def review_markdown(rows):
                       f"- 알림: {n['app_name']} / {n['sender']} / {n['title']}",
                       f"- 본문: {n['body']}", f"- 현재 창: {c['active_process']} / {c['window_title']}",
                       '- 최근 창: ' + (' → '.join(w['app_name'] + ' / ' + w['window_title'] for w in c['recent_windows']) or '(없음)'),
-                      f"- 근거: {row['reason']}", f"- 묶음: {row['group_id']} (분할 시 함께 이동)", '',
+                      f"- 근거: {row.get('label_policy', {}).get('reason', row['reason'])}", f"- 묶음: {row['group_id']} (분할 시 함께 이동)", '',
                       '- 검수: [ ] 유지 [ ] 수정 [ ] 제외 / 메모:', ''])
     return '\n'.join(lines)
 
 
-def prepare(output=OUTPUT, batch_name=None, *, context_priority=False):
+def prepare(output=OUTPUT, batch_name=None, *, context_priority=False, label_policy=POLICY):
     output = Path(output).resolve()
     parent = read(output / 'manifest.json')
     if parent.get('status') != 'review_pending' or parent.get('input_schema') != INPUT_SCHEMA:
@@ -345,7 +346,7 @@ def prepare(output=OUTPUT, batch_name=None, *, context_priority=False):
     for path in (source_dir / 'evaluation').glob('*.jsonl'):
         protected[str(path)] = digest(path)
         heldout.update(body_group(r['notification']['body']) for r in load_lines(path))
-    rows = make_drafts(context_priority=context_priority)
+    rows = apply_policy(make_drafts(context_priority=context_priority), label_policy)
     validate_drafts(rows)
     if any(body_group(r['state']['notification']['body']) in old_training | heldout for r in rows):
         raise ValueError('new body exactly overlaps training or held-out data')
@@ -353,14 +354,14 @@ def prepare(output=OUTPUT, batch_name=None, *, context_priority=False):
         raise ValueError('protected source changed before generation')
     output.joinpath(prefix).mkdir(parents=True, exist_ok=True)
     write_lines(output / targets[0], rows)
-    (output / targets[1]).write_text(review_markdown(rows), encoding='utf-8')
+    (output / targets[1]).write_text(review_markdown(rows) + '\n\nLabel policy: ' + label_policy + '\n', encoding='utf-8')
     if any(digest(Path(path)) != expected for path, expected in protected.items()):
         raise ValueError('protected source changed')
     manifest = {'purpose': 'Small relevance-only diversity pilot for user review, not a training set',
                 'created_date': created_date(), 'status': 'ai_proposed_unreviewed', 'input_schema': INPUT_SCHEMA,
                 'recent_windows_policy': RECENT_WINDOWS_POLICY, 'rows': len(rows), 'profile': profile(rows),
                 'case_counts': dict(Counter(r['case_kind'] for r in rows)),
-                'training_only_rows': sum(r.get('training_only', False) for r in rows),
+                'training_only_rows': sum(r.get('training_only', False) for r in rows), 'label_policy': label_policy,
                 'policy_confirmation': {'same_topic_without_direct_help': {'score': 2, 'status': 'user_confirmed'},
                                         'insufficient_evidence': {'score': 1, 'status': 'proposal_pending_review'},
                                         'clear_current_over_conflicting_history': {'status': 'user_confirmed'},
@@ -387,5 +388,6 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir', type=Path, default=OUTPUT)
     parser.add_argument('--batch-name')
     parser.add_argument('--context-priority', action='store_true')
+    parser.add_argument('--label-policy', choices=('legacy', POLICY), default=POLICY)
     args = parser.parse_args()
-    prepare(args.output_dir, args.batch_name, context_priority=args.context_priority)
+    prepare(args.output_dir, args.batch_name, context_priority=args.context_priority, label_policy=args.label_policy)

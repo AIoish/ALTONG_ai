@@ -9,8 +9,9 @@ from pathlib import Path
 
 from filtering_training.common.artifact_io import ROOT, created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_input import input_text
+from filtering_training.common.relevance_policy import POLICY, apply_policy
 from filtering_training.preparation.prepare_relevance_experiment import (
-    OUTPUT, audit_rows, load_sources, verify_splits,
+    OUTPUT, audit_rows, input_key, load_sources, verify_splits,
 )
 
 
@@ -24,10 +25,30 @@ def verify(folder=OUTPUT, *, write_report=True):
         if digest(folder / name) != info['sha256']:
             raise ValueError('output hash mismatch: ' + name)
     rows = load_lines(folder / 'relevance/train.jsonl') + load_lines(folder / 'relevance/validation.jsonl')
-    paths = {r['experiment']['origin']: Path(r['experiment']['source_file']) for r in rows}
-    if any(str(p.resolve()) not in manifest['protected_sources'] for p in paths.values()):
-        raise ValueError('unprotected source path')
-    sources, excluded = load_sources(*(paths[name] for name in ('balanced', 'pilot', 'real')), reviewed=paths.get('reviewed'))
+    migration = manifest.get('policy_migration')
+    if migration:
+        if migration['version'] != POLICY or manifest.get('label_policy') != POLICY:
+            raise ValueError('unknown migration policy')
+        parent = Path(migration['source'])
+        if parent.resolve() == folder.resolve():
+            raise ValueError('migration cannot reference itself')
+        verify(parent, write_report=False)
+        originals = [r for split in ('train', 'validation') for r in load_lines(parent / f'relevance/{split}.jsonl')]
+        sources = apply_policy(originals)
+        if rows != sources:
+            raise ValueError('migration changed inputs, splits, provenance or unexpected labels')
+        expected_changes = [dict(id=a['id'], split=a['split'], input_sha256=input_key(a),
+                                 previous_score=a['score'], score=b['score'], policy=POLICY)
+                            for a, b in zip(originals, sources) if a['score'] != b['score']]
+        if load_lines(folder / 'review/policy-changes.jsonl') != expected_changes:
+            raise ValueError('policy change ledger mismatch')
+        excluded = load_lines(parent / 'review/excluded.jsonl')
+    else:
+        paths = {r['experiment']['origin']: Path(r['experiment']['source_file']) for r in rows}
+        if any(str(p.resolve()) not in manifest['protected_sources'] for p in paths.values()):
+            raise ValueError('unprotected source path')
+        sources, excluded = load_sources(*(paths[name] for name in ('balanced', 'pilot', 'real')), reviewed=paths.get('reviewed'))
+        sources = apply_policy(sources, manifest.get('label_policy', 'legacy'))
     if excluded != load_lines(folder / 'review/excluded.jsonl'):
         raise ValueError('exclusion accounting changed')
     audit = audit_rows(rows)
@@ -40,6 +61,7 @@ def verify(folder=OUTPUT, *, write_report=True):
         count = 0
         for split in ('train', 'validation'):
             for old in load_lines(Path(manifest['frozen_reference']) / f'relevance/{split}.jsonl'):
+                old = apply_policy([old], manifest.get('label_policy', 'legacy'))[0]
                 new = current.get(old['id'])
                 if new is None or new['split'] != split or new['state'] != old['state'] or new['score'] != old['score']:
                     raise ValueError('frozen reference changed')
