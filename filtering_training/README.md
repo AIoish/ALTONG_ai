@@ -113,7 +113,7 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 
 ### 코드 검증
 
-학습 도구 검사 165개와 기존 필터링 검사 35개, 총 200개를 검증했다. 기존 공동 모델의 초기화·누적 학습·정책 이관 검사에 더해 정확도 우선 선택, 0.5%p 채택 경계, 3점 누락/오탐 퇴행 거부, 평가 세션 누출 차단, 예측 비공개 검수와 미응답 보존, 평가 전용 자료의 학습 유입 거부, 동결 학습 비중·시나리오별 총비중·0 가중치 누적 배치 등가성을 검사한다. 실제 v19·v20·v21 자료의 dry-run도 통과했다.
+학습 도구 검사176개와 기존 필터링 검사35개, 총211개를 검증했다. 기존 공동 모델·누적 학습·정책 이관·평가 기준·학습 비중 검사에 더해 교사 생성 전 묶음 동결, 평가 출처·본문 겹침 차단, 교사 제안의 비확정 표기와 검수 연결, 학생 후보 재구성을 검사한다. 실제 v19·v20·v21 자료와 v22 학생 후보의 실행 전 점검, 교사 초안의 토큰·중복·출처 검증도 통과했다.
 
 ### 단문 원문 진단
 
@@ -141,6 +141,69 @@ Encoder의 첫 토큰 표현과 dropout 0.1을 거쳐 선형 3클래스 헤드 �
 ```
 
 같은 원본 앱으로 바꾸거나 실제 입력에 최근 창이 없어서 변화가 없는 경우는 비교에서 제외한다. `model-*.cases.jsonl`에 원본 정답 일치·앱별 점수·최근 창 제거 점수를 모으고, `model-*.predictions.jsonl`에 입력 지문·확률을 기록한다. manifest에 원본·체크포인트·코드·결과 해시를 남긴다. 원본은 변경하지 않으며 이전 결과 폴더를 덮어쓰지 않는다. 추론·입력 직렬화·평가 함수는 기존 공통 경로를 사용한다. 이 진단은 신경망 내부 가중치나 독립 최종 성능을 측정하지 않는다.
+
+### 실제 CSV 기반 교사 초안
+
+`preparation/prepare_relevance_distillation.py`는 기존 실제 수집에서 생성용과 개발 평가 보류 묶음을 먼저 동결한다. 기존 분할·입력 지문·본문 및 근접 문장 연결 검사를 재사용하고, 교사 후보의 출처가 생성용 묶음에 속하는지 확인한다. 평가 보류·기존 보류의 입력이나 의미 있는 본문과 연결되는 후보를 거부한다. 어휘 기반 검사로 의미상 유출이 없다고 완전히 증명할 수는 없다.
+
+현재 `outputs/v22_real_seed_distillation_01/current-teacher.json`이 최신 초안을 가리킨다. 원본177행 중 기존 보류15행은 유지하고, 나머지를 생성용115행(37묶음)·개발 평가 보류47행(1묶음)으로 분리했다. 이47행은 이미 과거 모델 학습과 검토에 쓰였으므로 독립 최종 시험은 아니다. 2026-11-17에 사용자 점수 확인과 경계 사례 정정을 완료했으며, 최신 답변은 `current-real-review.json`이 가리킨다. 학생 후보에서는 이47행을 학습에서 제외하고 개발 검증으로 옮겼다. 새 모델은 KLUE 기반부터 학습해야 한다.
+
+첫 교사 배치는 생성용 실제 사례의6가지 패턴에서 작성한54행이다. 실제 코드·UI·에이전트·환경·보고서·설치 안내 패턴을 출발점으로 인물·프로젝트명을 익명화한 합성 대응 사례다. 새 교사 API를 호출하지 않고 Codex가 점수·입력 근거를 작성했다. 원본의 AI 제안 점수를 그대로 복사하지 않으며, 근거 문장은 검수용 메타데이터로만 보관한다. 확률이나 확신도를 교사의 보정된 예측값처럼 생성하지 않는다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_relevance_distillation `
+  --source filtering_training/outputs/v16_real_relevance_review_01/review/user-review-round-02-03/proposed.jsonl `
+  --output <새 동결 폴더>
+
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_relevance_distillation `
+  --source <동결 폴더> --teacher-candidates <교사 작성 JSONL> --output <새 교사 배치 폴더>
+
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_relevance_distillation `
+  --source <교사 배치 폴더> --review-teacher --review-first 1 5 50 20 30 33 54 `
+  --output <새 검수 폴더>
+```
+
+교사 JSONL에는 `id`, `seed_ids`, `scenario`, `case_kind`, `split=train`, `score`, `state`, `review_status=teacher_proposed_unreviewed`, `teacher`를 기록한다. teacher는 `reviewer=assistant`, `human_reviewed=false`, `reason`을 포함한다. 원문 입력은 현재 v3 그대로 유지한다. 검수 화면과 답변 처리는 기존 도구를 재사용하며 이번 초안에서는 교사 제안 점수와 근거를 보여 준다. 평가 검수의 예측 비공개 모드는 그대로 유지한다.
+
+첫 배치54행은3점36·2점6·1점12행이며 최대223토큰이다. 짧지만 유용한 수정본·검증 결과, 앱만 다른 같은 알림, 현재 작업과 최근 작업 충돌, 모호한 현재 창의 최근 창 보완, 같은 주제 잡담, 작업용 자료 링크, 대상 없는 반응을 구분한다. 처음48행을 보존하고 짧은 유용 알림6행을 추가한 기록이다. 이후72행을 추가해126행, 다른 실제 원본 패턴48행을 추가해 현재174행으로 확장했다. 부모 배치를 별도로 합산하지 않는다. 기본 학습 입력 v21과 기존 모델은 변경하지 않았다.
+
+1차 A~G는 사용자가 3·1·3·2·3·3·3점으로 확정했다. 당시 결과 `user-reviewed-01/candidates.jsonl`은7행만 사용자 확인으로 표시한다. 나머지47행은 원래 교사 제안 그대로이고 전체 `training_ready=false`를 유지한다. 원본 교사 귀속도 따로 보존한다. 답변 반영은 `prepare_relevance_distillation --source <교사 배치> --review-folder <검수 폴더> --answers <답변 JSON> --output <새 검수 결과>`로 수행하며, 기존 답변 처리기의 입력 지문 검증·미응답 보존을 재사용한다.
+
+이후 교사 나머지47행을 AI가 직접 검수해 점수 변경 없이 유지했다. 당시 결과는 `assistant-reviewed-01/candidates.jsonl`이며 사용자 확정7·AI 검수47을 구분한다. `--assistant-decisions <JSONL>`로 입력 지문·점수·AI 귀속·근거를 확인해 반영하며, AI가 사용자 확정 입력을 덮어쓰는 것은 거부한다. AI 검수는 독립된 정답 검증이나 사용자 확정이 아니다.
+
+### 2026-11-17 — 기준 정리와 학생 학습 후보
+
+사용자는 현재 창의 프로젝트명·사용 중인 도구명만 있는 알림을3점으로 확정했다. 이는 예전의 주제만 겹치는 단독 명칭2점 기준을 바꾸는 개발 정책이다. 대상 없는 반응은1점, 같은 주제의 잡담·일반 도구 업데이트 소식은2점을 유지한다. 최근 창에만 해당 프로젝트가 있고 현재 작업이 명확하게 다르면1점이며, 모호한 현재 창은 최근 창의 구체적 작업 근거를 보조로 사용한다. 자동 추론 규칙이나 입력 문자열 치환을 추가하지 않았다.
+
+생성용 실제 자료의 협업·도구·작업 패턴에서 다른 프로젝트와 프로그램을 사용하는72행을 작성했다. 재고표·디자인·CAD·3D·분석·음성 편집6종에서 프로젝트명·도구명·오타·진행 질문·알림 앱 변경·현재/최근 충돌·불명확한 현재 창·잡담·일반 소식·반응을 대비한다. 평가 원문이나 평가 문장의 이름만 바꾼 복사본으로 만들지 않았다. 기존54행의 사용자 확인과 입력은 그대로 보존했다.
+
+첫 확장 교사 후보 `teacher-expanded-01`은126행(1점30·2점24·3점72)이며 사용자 확인7행·AI 검수119행이다. 실제 평가 후보47건(1점25·2점2·3점20)은 별도 자료다. 이47건은 한 수집 묶음이고2점 사례가 적으므로, 전체 정답률만으로 실제 사용 성능을 대표한다고 해석하지 않는다.
+
+`prepare_relevance_distillation --student`는 기존 분할·입력 지문·근접 본문 검사를 재사용한다. 기존 실제 자료를 동결한 생성/평가 분할로 대체하고, 평가 입력·본문·출처와 연결되는 학습 후보도 제거한다. 검증과 겹치는 교사 후보는 거부한다. 명시적인 AI 수정 JSONL로 생성용8행의 기준 충돌을 수정했으며 입력·이전 검수 기록을 보존했다. 사용자 확정 행과 평가 정답을 AI 수정으로 덮어쓰는 것은 거부한다.
+
+첫 학생 후보 `student-candidate-01`은 학습4,058행(기존3,932+교사126), 검증1,032행(기존985+실제47)이다. 검증기는 보호된 원본에서 자료·분할·수정 기록을 다시 만들고 결과 전체와 비교한다. `training_ready=false`는 AI 제안 자료를 인간 정답으로 승격하지 않았다는 뜻이며, 실험 학습은 기존의 `--allow-candidate-labels` 경로를 사용한다. 학생 학습·모델 채택·기본 데이터 변경은 아직 진행하지 않았다.
+
+```powershell
+.\.venv\Scripts\python.exe -m filtering_training.preparation.prepare_relevance_distillation `
+  --source filtering_training/outputs/v22_real_seed_distillation_01/frozen `
+  --student --reference filtering_training/outputs/v21_relevance_reaction_policy_01/baseline `
+  --teacher filtering_training/outputs/v22_real_seed_distillation_01/teacher-expanded-02 `
+  --real-review filtering_training/outputs/v22_real_seed_distillation_01/real-reviewed-17 `
+  --policy-decisions filtering_training/outputs/v22_real_seed_distillation_01/training-policy-decisions-01.jsonl `
+  --output <새 학생 후보 폴더>
+```
+
+재료를 합칠 때는 `--source <기존 교사 폴더> --merge-teacher <추가 교사 폴더> --output <새 활성 폴더>`를 사용한다. 기존 교사·추가 교사·확장 결과를 중복 합산하지 않는다. 다음 학습에서는 증류 자료의 손실 비중을 명시해 기준 실험과 비교해야 하며, 출처 균형 기본값에 추가 행을 넣는 것만으로 비중이 통제됐다고 해석하지 않는다.
+
+실제 CSV 검수 준비 명령은 `--source <frozen 폴더> --review-heldout --output <새 검수 폴더>`다. 보존된 `real-heldout-review-01/검수하기.html`은 당시 사용자 확정5건을 재사용하고 나머지42건만 예측·제안 점수 없이 보여 준다. 이 화면의 A~G는 앞서 승인한 합성 교사 A~G와 다른 실제 입력이다. 이47건과 첫 교사 AI 검수47건은 서로 다른 자료이며 실제47건은 이후 사용자 검수를 완료했다.
+
+### 미사용 실제 원본 패턴 추가
+
+생성용115건을 다시 읽어 이전에 활용하지 않은 패턴에서48행을 추가했다. 제출 조건, 파일명·링크만 있는 알림, 본문 없는 시스템 알림, 보이지 않는 사진 내용, 수치 조각, 대상이 생략된 요청, 일정과 긴급 표현, 같은 분야의 일반 소식을 다룬다. 현재 작업이 구체적인지와 알림이 대상을 식별하는지에 따라 같은 본문도 다른 점수가 될 수 있도록 대비했다. 원본의 AI 점수는 상속하지 않았고, 파일·링크·이미지 내부 내용이나 이전 대화를 추측하지 않았다.
+
+추가48행은1점14·2점18·3점16행이며 AI 검수 제안이다. `teacher-batch-04`에서 출처·본문·입력·토큰을 검사하고 `assistant-reviewed-03`에 근거를 기록했다. 기존126행의 전체 필드를 보존해 합친 활성 `teacher-expanded-02`는174행(1점44·2점42·3점88), 사용자 확인7·AI 검수167행이다. 활용한 생성용 원본은6건에서42건으로 늘었다. 서로 독립적인 실제 수집42건이나 실제 원문174건이라는 뜻은 아니다.
+
+현재 포인터 `current-teacher.json`은 `teacher-expanded-02`, `current-student.json`은 `student-candidate-02`를 가리킨다. 최신 학생 후보는 학습4,106행(기존3,932+교사174), 검증1,032행이다. 기존 검증1,032건의 ID·입력·정답 전체를 유지했고, 평가47건의 학습 혼입과 검사한 본문·묶음 겹침은 없다. 원본과 이전 후보는 보존했으며 기존 도구만 재사용했다. 추가 모델 학습은 아직 하지 않았다.
 
 ### 학습 비중 통제 실험
 

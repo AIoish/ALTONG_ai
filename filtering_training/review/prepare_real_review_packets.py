@@ -86,7 +86,7 @@ def write_packet(output, packet, **metadata):
         raise ValueError('expected one packet placeholder')
     (output / '검수하기.html').write_text(template.replace('__PACKET_JSON__', payload), encoding='utf-8')
     lines = ['<!-- 용도: 실제 알림 경계 사례 검수 카드. 생성일: ' + created_date() + ' -->',
-             '# 관련도 검수', '', ('각 카드에서 점수 또는 보류를 직접 선택해 줘. 예측·제안 점수는 표시하지 않아.' if packet.get('blind') else '먼저 1차 A~F만 검수. 답변: `A=2, B=3, C=보류`.'),
+             '# 관련도 검수', '', packet.get('instructions') or ('각 카드에서 점수 또는 보류를 직접 선택해 줘. 예측·제안 점수는 표시하지 않아.' if packet.get('blind') else '먼저 1차 A~F만 검수. 답변: `A=2, B=3, C=보류`.'),
              '1=무관, 2=일부 연결·도움 불명확, 3=현재 작업에 유용. 미응답은 승인되지 않음.', '']
     with (output / '카드목록.csv').open('w', encoding='utf-8-sig', newline='') as stream:
         writer = csv.writer(stream)
