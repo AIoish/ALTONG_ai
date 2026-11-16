@@ -8,7 +8,7 @@ import math
 from filtering_training.preparation.curate_relevance import key
 
 
-def mixture_weights(rows, reference, supplement_share, *, base_shares=None):
+def mixture_weights(rows, reference, supplement_share, *, base_shares=None, scenario_field='experiment_group'):
     if not math.isfinite(supplement_share) or not 0 <= supplement_share < 1:
         raise ValueError('supplement share must be finite in [0, 1)')
     by_id = {r['id']: r for r in reference}
@@ -42,9 +42,13 @@ def mixture_weights(rows, reference, supplement_share, *, base_shares=None):
     for row in rows:
         if row['id'] in by_id:
             continue
-        if row.get('training_only') is not True or row['split'] != 'train':
+        teacher = source(row) == 'teacher_distilled' and row['experiment'].get('train_only') is True
+        if (row.get('training_only') is not True and not teacher) or row['split'] != 'train':
             raise ValueError('additional candidates must be explicitly training-only')
-        supplements[row['experiment_group']].append(row['id'])
+        scenario = row.get(scenario_field)
+        if not isinstance(scenario, str) or not scenario.strip():
+            raise ValueError('explicit supplemental scenario required')
+        supplements[scenario].append(row['id'])
     if supplement_share and not supplements:
         raise ValueError('nonzero supplement share requires supplemental scenarios')
     weights, report_groups = {}, defaultdict(lambda: {'rows': 0, 'scenarios': 0, 'mass': 0.})
@@ -66,6 +70,7 @@ def mixture_weights(rows, reference, supplement_share, *, base_shares=None):
     if not math.isclose(sum(result)/len(rows), 1, abs_tol=1e-10):
         raise ValueError('mixture mean must equal one')
     report = {'version': 'frozen-reference-mixture-v1', 'supplement_share': supplement_share,
+              'supplement_scenario_field': scenario_field,
               'groups': dict(report_groups), 'zero_weight_rows': sum(w == 0 for w in result),
               'minimum_weight': min(result), 'maximum_weight': max(result), 'mean_weight': sum(result)/len(rows),
               'row_weight_sha256': key(list(zip([r['id'] for r in rows], result))),

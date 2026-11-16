@@ -68,6 +68,10 @@ class RelevanceOnlyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check_settings(dict(DEFAULTS, **change))
 
+    def test_distillation_cannot_silently_use_default_origin_balance(self):
+        with self.assertRaisesRegex(ValueError, 'explicit loss mixture'):
+            train('unused', {}, {}, None, {'fresh_base_required':True}, DEFAULTS)
+
     def test_exact_score_selection_and_origin_loss_weights_are_separate(self):
         a = {'macro_f1': .99, 'exact_accuracy': .99, 'mae': .01,
              'by_origin': {'balanced': {'macro_f1': 1.}, 'pilot': {'macro_f1': .5}}}

@@ -108,6 +108,7 @@ def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False):
     majority = max(range(1, 4), key=lambda s: (counts[s], -s))
     config = {'purpose': 'Relevance-only development experiment; no urgency head or final-test selection',
               'created_date': created_date(), 'input_schema': INPUT_SCHEMA, 'output_classes': {'relevance': 3},
+              'fresh_base_required': manifest.get('fresh_base_required', False),
               'dataset_dir': str(dataset), 'base_dir': str(base), 'candidate_labels_used': candidate,
               'label_status': 'mixed_assistant_and_user_candidates' if candidate else 'approved',
               'train_rows': len(rows['train']), 'validation_rows': len(rows['validation']),
@@ -140,6 +141,26 @@ def configure_mixture(rows, config, reference, supplement_share, *, base_shares=
     for name in ('manifest.json','relevance/train.jsonl','relevance/validation.jsonl'):
         config['protected_hashes'][str(reference/name)] = digest(reference/name)
     config.update(row_loss_weights=weights, training_mixture=report, mixture_reference=str(reference))
+    return report
+
+
+def configure_distillation(rows, config, supplement_share):
+    """Use the verified student's own revised base rows; keep leakage groups intact."""
+    if not read(Path(config['dataset_dir']) / 'manifest.json').get('distillation_preparation'):
+        raise ValueError('verified distillation student dataset required')
+    frozen = [r for r in rows['train'] if r['experiment']['origin'] != 'teacher_distilled']
+    counts = Counter(r['experiment']['origin'] for r in frozen)
+    if not frozen or not any(r['experiment']['origin'] == 'teacher_distilled' for r in rows['train']):
+        raise ValueError('both revised base rows and teacher rows required')
+    shares = {origin: count / len(frozen) for origin, count in counts.items()}
+    weights, report = mixture_weights(rows['train'], frozen, supplement_share,
+                                      base_shares=shares, scenario_field='scenario')
+    from filtering_training.preparation.curate_relevance import key
+    report.update(base_weighting='uniform per base row; teacher mass explicitly controlled',
+                  base_shares=shares, reference_rows=len(frozen),
+                  reference_sha256=key(frozen), validation_sha256=key(rows['validation']))
+    config.update(row_loss_weights=weights, training_mixture=report,
+                  mixture_reference='verified student minus teacher_distilled; same revised labels and validation')
     return report
 
 
@@ -180,6 +201,8 @@ def train(run, rows, encoded, tokenizer, config, settings):
     from transformers import get_linear_schedule_with_warmup
     run = Path(run)
     check_settings(settings)
+    if config.get('fresh_base_required') and 'training_mixture' not in config:
+        raise ValueError('distillation requires explicit loss mixture; use run_relevance_mixture --dataset')
     if run.exists():
         raise ValueError('preserve existing run; choose a new folder')
     if settings['device'].startswith('cuda') and not torch.cuda.is_available():
