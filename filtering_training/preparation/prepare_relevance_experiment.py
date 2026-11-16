@@ -164,7 +164,7 @@ def assign_splits(rows, group_ids, *, fraction=0.2, seed=42, reference=None):
     return result
 
 
-def verify_splits(rows, source_rows, group_ids, near_edges):
+def verify_splits(rows, source_rows, group_ids, near_edges, *, reaction_predicate=context_only_reaction):
     source = {r['id']: r for r in source_rows}
     if len(rows) != len(source) or {r['id'] for r in rows} != set(source):
         raise ValueError('split lost or duplicated rows')
@@ -181,7 +181,7 @@ def verify_splits(rows, source_rows, group_ids, near_edges):
         groups[row['experiment_group']].add(split)
         signatures[input_key(row)].add(split)
         body = normalized(core_body(row['state']['notification']['body']))
-        if body and not context_only_reaction(row['state']['notification']['body']):
+        if body and not reaction_predicate(row['state']['notification']['body']):
             bodies[body].add(split)
     if any(len(s) > 1 for mapping in (groups, signatures, bodies) for s in mapping.values()):
         raise ValueError('group/input/body leakage across splits')

@@ -1,11 +1,18 @@
 # 파일 역할과 사용 상태
 
+> 2026-11-17: `prepare_relevance_distillation.py`가 교사 확장 병합과 학생 후보 조립까지 담당한다.
+> `verify_relevance_experiment.py`는 동결 출처에서 이를 재구성해 평가 자료의 학습 혼입과 검수 귀속 변조를 검사한다.
+> 최신 교사126행·사용자 확인 실제 개발47행·학생 후보는 각각 로컬 v22의 `current-teacher.json`, `current-real-review.json`, `current-student.json`으로 찾는다. 학생 학습은 아직 실행하지 않았다.
+
+> 2026-11-15: `preparation/prepare_relevance_distillation.py`는 실제 수집의 생성/개발 보류 분할 동결과 교사 초안 출처·누출 검증, 기존 UI를 이용한 검수 출력을 담당한다.
+> 최신 실제 기반 교사 초안은 로컬 v22의 `current-teacher.json`으로 찾으며 아직 기본 학습 자료에 포함하지 않았다.
+
 > 2026-11-15: `common/relevance_mixture.py`는 동결 기준의 손실 비중과 신규 시나리오 비중을 계산한다.
 > `modeling/run_relevance_mixture.py`는 기존 학습·평가 경로로 사전 고정한 비중 비교와 조건부 반복 시드 실험을 실행한다.
 
 > 2026-11-15: `quality/relevance_evaluation.py`는 자료 사용 이력·사용자 확정 채택 조건·동일 자료 비교를 관리한다.
 > `preparation/prepare_real_evaluation.py`는 새 수집의 세션별 평가 분할·예측 비공개 검수를 준비하며 기존 검수 UI와 답변 처리기를 재사용한다.
-> 실제 개발 평가와 최종 평가 자료는 아직 확보·검수되지 않았다.
+> 새 독립 수집의 개발·최종 평가는 아직 없다. 기존 수집의 개발47건은 이후 사용자 검수를 완료했다.
 
 > 2026-11-15: 대상 없는 반응 정책은 `common/relevance_policy.py`, 원본 보존 이관·저장 예측 재채점은
 > `preparation/migrate_relevance_policy.py`가 담당한다. 학습 기본 후보는 v21의 `baseline`이며 이번 단계에서는 재학습하지 않았다.

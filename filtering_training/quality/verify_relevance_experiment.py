@@ -9,7 +9,7 @@ from pathlib import Path
 
 from filtering_training.common.artifact_io import ROOT, created_date, digest, load_lines, read, write
 from filtering_training.common.encoder_input import input_text
-from filtering_training.common.relevance_policy import POLICY, apply_policy
+from filtering_training.common.relevance_policy import POLICY, apply_policy, targetless
 from filtering_training.preparation.prepare_relevance_experiment import (
     OUTPUT, audit_rows, input_key, load_sources, verify_splits,
 )
@@ -43,6 +43,20 @@ def verify(folder=OUTPUT, *, write_report=True):
         if load_lines(folder / 'review/policy-changes.jsonl') != expected_changes:
             raise ValueError('policy change ledger mismatch')
         excluded = load_lines(parent / 'review/excluded.jsonl')
+    elif manifest.get('distillation_preparation'):
+        from filtering_training.preparation.prepare_relevance_distillation import student_materials
+        inputs=manifest['distillation_preparation']
+        required=[Path(inputs[k]).resolve()/'manifest.json' for k in ('reference','frozen','teacher','real_review')]
+        if inputs.get('decisions'):required.append(Path(inputs['decisions']).resolve())
+        if any(str(p) not in manifest['protected_sources'] for p in required):
+            raise ValueError('unprotected distillation source')
+        sources,excluded,expected_near,changes,_=student_materials(**inputs)
+        expected=[r for split in ('train','validation') for r in sources if r['split']==split]
+        if rows!=expected:raise ValueError('distillation rows or provenance changed')
+        if load_lines(folder/'review/policy-changes.jsonl')!=changes:
+            raise ValueError('distillation policy change ledger mismatch')
+        if load_lines(folder/'review/near-duplicate-links.jsonl')!=expected_near:
+            raise ValueError('distillation grouping ledger mismatch')
     else:
         paths = {r['experiment']['origin']: Path(r['experiment']['source_file']) for r in rows}
         if any(str(p.resolve()) not in manifest['protected_sources'] for p in paths.values()):
@@ -55,7 +69,8 @@ def verify(folder=OUTPUT, *, write_report=True):
     if audit['exact_input_label_conflicts'] or audit['content_window_score_warnings']:
         raise ValueError('label conflicts found')
     near = load_lines(folder / 'review/near-duplicate-links.jsonl')
-    result = verify_splits(rows, sources, {r['id']: r['experiment_group'] for r in rows}, near)
+    grouping={'reaction_predicate':targetless} if manifest.get('distillation_preparation') else {}
+    result = verify_splits(rows, sources, {r['id']: r['experiment_group'] for r in rows}, near, **grouping)
     if manifest.get('frozen_reference'):
         current = {r['id']: r for r in rows}
         count = 0
