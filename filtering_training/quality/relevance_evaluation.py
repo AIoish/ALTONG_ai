@@ -45,6 +45,37 @@ def decide(baseline, candidate, contract=CONTRACT):
             'interpretation': 'Passing development constraints permits further evaluation; it does not establish real-use performance.'}
 
 
+def development_report(rows, scores):
+    """Report the same predictions by origin and current/history conflict, never training rows."""
+    report = metrics(rows, scores)
+    from filtering_training.preparation.curate_relevance import key
+    report['evaluation_sha256'] = key([(r['id'], r['state'], r['score']) for r in rows])
+    slices = {}
+    for origin in sorted({r['experiment']['origin'] for r in rows}):
+        indices = [i for i, r in enumerate(rows) if r['experiment']['origin'] == origin]
+        slices['origin:' + origin] = metrics([rows[i] for i in indices], [scores[i] for i in indices])
+    indices = [i for i, r in enumerate(rows) if r.get('case_kind') == 'current_history_conflict']
+    if indices:
+        slices['case:current_history_conflict'] = metrics([rows[i] for i in indices], [scores[i] for i in indices])
+    report['development_slices'] = slices
+    return report
+
+
+def development_decision(baseline, candidate):
+    if baseline['evaluation_sha256'] != candidate['evaluation_sha256']:
+        raise ValueError('same evaluation inputs and labels required')
+    decision = decide(baseline, candidate)
+    before, after = baseline['development_slices'], candidate['development_slices']
+    if before.keys() != after.keys():
+        raise ValueError('same development slices required')
+    decision['slices'] = {name: decide(before[name], after[name]) for name in before}
+    decision['slice_policy'] = 'Apply the confirmed accuracy/miss/false-relevant limits to each origin and conflict slice.'
+    if any(d['development_gate'] != 'pass' for d in decision['slices'].values()):
+        decision['development_gate'] = 'reject'
+        decision['violations'].append('development_slice_regressed')
+    return decision
+
+
 def compare(dataset, baseline_run, candidate_run, output):
     from filtering_training.preparation.migrate_relevance_policy import rescore
     output = Path(output)

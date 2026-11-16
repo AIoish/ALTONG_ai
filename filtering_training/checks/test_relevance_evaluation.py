@@ -12,7 +12,9 @@ from filtering_training.common.relevance_policy import POLICY
 from filtering_training.preparation.curate_relevance import write_lines
 from filtering_training.preparation.prepare_real_evaluation import partition, prepare, apply_answers, draft_plan
 from filtering_training.preparation.prepare_relevance_experiment import load_sources
-from filtering_training.quality.relevance_evaluation import compare_real, decide, metrics
+from filtering_training.quality.relevance_evaluation import (
+    compare_real, decide, metrics, development_report, development_decision,
+)
 
 
 def row(identifier, body):
@@ -118,6 +120,27 @@ class EvaluationTests(unittest.TestCase):
                 write_lines(path,[item]);write(folder/'manifest.json',{'policy':POLICY,'files':{path.name:digest(path)}})
                 with self.assertRaisesRegex(ValueError,'only explicitly reviewed'):
                     compare_real(path,folder/'baseline',folder/'candidate',folder/'result')
+
+
+class DevelopmentSliceTests(unittest.TestCase):
+    def test_global_improvement_cannot_hide_real_regression(self):
+        rows = [dict(row(str(i), 'body'), score=1,
+                     experiment={'origin':'real_development' if i == 0 else 'balanced'}) for i in range(5)]
+        before = development_report(rows, [1,2,2,1,1])
+        after = development_report(rows, [2,1,1,1,1])
+        self.assertEqual(decide(before,after)['development_gate'], 'pass')
+        decision = development_decision(before,after)
+        self.assertEqual(decision['development_gate'], 'reject')
+        self.assertEqual(decision['slices']['origin:real_development']['development_gate'], 'reject')
+
+    def test_conflict_slice_and_equal_predictions(self):
+        rows = [dict(row('a','body'), score=3, experiment={'origin':'pilot'},
+                     case_kind='current_history_conflict')]
+        before = development_report(rows,[3])
+        self.assertEqual(development_decision(before,before)['development_gate'],'pass')
+        after = development_report(rows,[2])
+        decision = development_decision(before,after)
+        self.assertIn('relevant_misses_increased',decision['slices']['case:current_history_conflict']['violations'])
 
 
 if __name__ == '__main__':
