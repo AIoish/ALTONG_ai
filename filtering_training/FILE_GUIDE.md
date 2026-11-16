@@ -2,7 +2,7 @@
 
 > 2026-11-17: `prepare_relevance_distillation.py`가 교사 확장 병합과 학생 후보 조립까지 담당한다.
 > `verify_relevance_experiment.py`는 동결 출처에서 이를 재구성해 평가 자료의 학습 혼입과 검수 귀속 변조를 검사한다.
-> 최신 교사126행·사용자 확인 실제 개발47행·학생 후보는 각각 로컬 v22의 `current-teacher.json`, `current-real-review.json`, `current-student.json`으로 찾는다. 학생 학습은 아직 실행하지 않았다.
+> 최신 교사174행·사용자 확인 실제 개발47행·학생 후보(학습4,106·검증1,032)는 각각 로컬 v22의 `current-teacher.json`, `current-real-review.json`, `current-student.json`으로 찾는다. 학생 학습은 아직 실행하지 않았다.
 
 > 2026-11-15: `preparation/prepare_relevance_distillation.py`는 실제 수집의 생성/개발 보류 분할 동결과 교사 초안 출처·누출 검증, 기존 UI를 이용한 검수 출력을 담당한다.
 > 최신 실제 기반 교사 초안은 로컬 v22의 `current-teacher.json`으로 찾으며 아직 기본 학습 자료에 포함하지 않았다.
