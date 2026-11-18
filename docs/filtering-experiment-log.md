@@ -3484,3 +3484,14 @@ PR #27 병합 `da3bf83` 이후 `feature/relevance-real-seed-distillation`에서 
 `plan.json`, `mixtures.json`, `row-weights.json`, `screening.json`, `results.json`, `summary.json`, `status.json`, 모델별 에폭/선택 예측 및 오류 파일과 실행 코드 스냅샷을 보존했다. 추가 `paired-error-analysis.json`은 ID별 예측 변화와 출처별 개선/퇴행을 기록하며 원문은 공개 문서에 복사하지 않았다. 코드와 보호 원본 해시는 유지됐다. 기본 학생·교사 포인터나 모델 채택 상태를 승격하지 않았다.
 
 다음 개선은 단순 증량이나10% 이상 비중 증가보다 학습 자료의2/3 경계와 이름/작업 표현 대응을 보강하고, 같은 내용에 방 제목·앱·무관 최근창만 바꾼 대비로 지름길을 확인하는 것이다. 기존 문장 틀 편향과 실제2점 평가2건의 부족, 과거 검수에 노출된 개발 자료라는 한계는 남는다. 새 독립 실제 최종시험 성능을 얻었다고 주장하지 않는다.
+
+
+### 2026-11-17 — 앱 소스 없는 긴급도5점·관련도3점 모델 전달 파일
+
+사용자 요청으로 앱 소스는 수정하지 않고 모델·토크나이저·적용 안내만 준비했다. 최신 develop(PR29 병합)에서 feature/filtering-model-handoff를 만들고 기존 공통 Encoder/입력/토큰 검사를 재사용하는 modeling/export_filtering_handoff.py를 추가했다. 기존 안전 보강 체크포인트에서 긴급도head만 남겨 FP32 ONNX로 추출하고, 신규5% 관련도 선택2epoch도 별도FP32 ONNX로 내보냈다. 재학습은 없다. 두 출력은 각각logits[batch,5]와[batch,3]이다.
+
+긴급도98건(기존74+합성24)에서 추출PyTorch/새ONNX/기존긴급도ONNX 점수 일치, 관련도1056건(개발1032+합성24)에서 PyTorch/ONNX 점수 및 기존 개발 예측 일치를 확인했다. 점수 불일치0건, 최대 절대logit오차 각각약1.05e-5/1.34e-5. 각 모델의 대표입력 batch1 실행·출력차원·점수도 확인했다. 포장한tokenizer에서 로컬경로키를 제거하고 재로딩한전체토큰일치, 내부파일14개해시 및ZIP CRC/최종SHA256을 확인했다.
+
+출력은 outputs/handoff/ALTONG_filtering_u5_r3_2026-11-17.zip(761605607bytes)와 별도 _APPLY_GUIDE.md, .zip.sha256.json이다. ZIP에는 두 ONNX/토크나이저/manifest, 공개합성24입력의토큰·기대예측, 변환보고서와안내만 포함한다. 원본실제알림/학습자료/.pt/C#앱코드/개인경로는 포함하지 않았다. C# 및실제앱검증은 미실행이며 manifest/report/안내에 표시했다. U>=4 OR R==3은 정책제안으로만 기록한다. 모델공식채택을 뜻하지 않는다. 사용자가 릴리즈를 직접 올린다고 명시했으므로 릴리즈/태그생성·원격업로드·추가커밋/푸시는 하지 않았다.
+
+2026-11-18 추가 확인: ZIP을 새로 풀어 내부 manifest 해시 13개와 각 모델 해시를 다시 대조했다. 패키지 tokenizer로 공개 합성 fixture 24건을 재토큰화한 결과 두 작업 모두 input_ids·attention_mask가 일치했다. CPU ONNX Runtime 1.31.0 batch1 점수 불일치는 0건이다. 24건을 padding한 batch 실행에서도 행별 점수가 같았다. 입출력은 Int64 `[batch,sequence]` 두 개와 `logits` float32 `[batch,5]`/`[batch,3]`이다. fixture 예측 분포는 긴급도 1점19·2점3·3점1·5점1, 관련도 1점23·3점1이다. 이는 변환 동작 확인이며 정확도 평가가 아니다. 공개 fixture는 관련도 2점과 긴급도 4점 출력을 포함하지 않는다. 저장소 적용 안내에는 batch 행별 계산과 관련도 manifest 필드 의미만 보완했고, ZIP은 다시 만들지 않았다. C# 및 실제 앱 검증은 앱팀이 담당한다.
