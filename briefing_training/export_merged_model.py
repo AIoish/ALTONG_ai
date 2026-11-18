@@ -11,14 +11,14 @@ from src.briefing.category_correction import correction_manifest
 from src.briefing.qwen_prompt import MODEL_NAME
 
 
-def validate_export(adapter: Path, output: Path) -> str:
+def validate_export(adapter: Path, output: Path, model_name: str = MODEL_NAME) -> str:
     for name in ("adapter_config.json", "adapter_model.safetensors"):
         if not (adapter / name).is_file():
             raise ValueError(f"missing adapter file: {adapter / name}")
     config = json.loads((adapter / "adapter_config.json").read_text(encoding="utf-8"))
     base = config.get("base_model_name_or_path")
-    if base != MODEL_NAME:
-        raise ValueError(f"expected {MODEL_NAME}; adapter declares {base}")
+    if base != model_name:
+        raise ValueError(f"expected {model_name}; adapter declares {base}")
     if output.exists():
         raise ValueError("output already exists; choose a new directory (no overwrite)")
     if adapter.resolve() == output.resolve() or adapter.resolve() in output.resolve().parents:
@@ -30,9 +30,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--adapter-path", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--model-name", default=MODEL_NAME)
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
-    base_name = validate_export(args.adapter_path, args.output_dir)
+    base_name = validate_export(args.adapter_path, args.output_dir, args.model_name)
     if args.validate_only:
         print(f"Ready to merge {base_name}; source adapter will not be modified")
         return

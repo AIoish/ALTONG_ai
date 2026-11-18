@@ -195,6 +195,7 @@ def main(*, model_loader=None, summary_generator=None, runtime_metadata=None) ->
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=Path)
     parser.add_argument("--task", choices=("briefing", "summary"), default="summary")
+    parser.add_argument("--model-name", default=MODEL_NAME, help="Qwen3 base model identifier")
     parser.add_argument("--no-category-correction", action="store_true",
                         help="evaluate raw model categories without runtime postprocessing")
     parser.add_argument(
@@ -225,7 +226,10 @@ def main(*, model_loader=None, summary_generator=None, runtime_metadata=None) ->
 
     cases = load_cases(args.cases)
     validate_evaluation_cases(cases)
-    tokenizer, model = (model_loader or load_model)(adapter_path=args.adapter_path)
+    loader_options = {"adapter_path": args.adapter_path}
+    if args.model_name != MODEL_NAME:
+        loader_options["model_name"] = args.model_name
+    tokenizer, model = (model_loader or load_model)(**loader_options)
     structured_count = 0
     raw_contract_count = 0
     format_repair_count = 0
@@ -388,7 +392,7 @@ def main(*, model_loader=None, summary_generator=None, runtime_metadata=None) ->
         "raw_case_pass_rate": round(raw_passed_case_count / len(cases), 4),
         "generation_mode": "greedy" if args.greedy else "sampling",
         "prompt_style": args.prompt_style,
-        "model": MODEL_NAME,
+        "model": args.model_name,
         "adapter_path": str(args.adapter_path)
         if args.adapter_path is not None
         else None,
