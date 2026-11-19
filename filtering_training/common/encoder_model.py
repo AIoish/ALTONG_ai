@@ -21,7 +21,8 @@ def build_encoder(*, base, config=None, pretrained=True, head_sizes=(5, 5),
         def __init__(self):
             super().__init__()
             model_config = config if config is not None else AutoConfig.from_pretrained(str(base), local_files_only=True)
-            if required_model_type and model_config.model_type != required_model_type:
+            allowed = (required_model_type,) if isinstance(required_model_type, str) else required_model_type
+            if allowed and model_config.model_type not in allowed:
                 raise ValueError('unexpected encoder model type')
             kwargs = {'attn_implementation': attention}
             if model_config.model_type == 'roberta':
