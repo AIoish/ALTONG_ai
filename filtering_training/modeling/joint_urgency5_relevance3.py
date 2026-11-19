@@ -211,7 +211,9 @@ def prepare(dataset_dir=DEFAULT_DATASET):
             raise ValueError('Frozen safety data changed')
         protected[str(SAFETY/filename)]=digest(SAFETY/filename)
     for folder,names in [(BASE,['model.safetensors','config.json','manifest.json','tokenizer.json']),
-                         (OLD_BASE,['model.pt','run_config.json','tokenizer/tokenizer.json']),
+                         # OLD_BASE model.pt was removed on 2026-11-18 (see outputs/_maintenance/
+                         # 2026-11-18-unused-model-weights-deletion.json); only its config/tokenizer remain.
+                         (OLD_BASE,['run_config.json','tokenizer/tokenizer.json']),
                          (OLD_SAFETY,['model.pt','model-fp32.onnx','run_config.json','tokenizer/tokenizer.json'])]:
         for filename in names:
             protected[str(folder/filename)]=digest(folder/filename)

@@ -20,6 +20,8 @@ from filtering_training.quality.verify_relevance_experiment import verify
 
 BASE = ROOT / 'filtering_training/outputs/models/klue-roberta-base'
 DATASET = ROOT / 'filtering_training/outputs/v21_relevance_reaction_policy_01/baseline'
+# First-token pooled BERT-family encoders whose tokenizer the app contract can reproduce.
+SUPPORTED_MODEL_TYPES = ('roberta', 'electra')
 DEFAULTS = {'seed': 42, 'epochs': 3, 'micro_batch': 2, 'effective_batch': 16,
             'eval_batch': 8, 'encoder_lr': 2e-5, 'head_lr': 1e-4, 'warmup_ratio': .1,
             'weight_decay': .01, 'patience': 2, 'attention': 'sdpa', 'device': 'cuda',
@@ -82,20 +84,20 @@ def candidate_permission(manifest, allow_candidates):
     return candidate
 
 
-def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False):
+def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False, schema=INPUT_SCHEMA):
     from transformers import AutoTokenizer
     dataset, base = Path(dataset).resolve(), Path(base).resolve()
     manifest = read(dataset / 'manifest.json')
     candidate = candidate_permission(manifest, allow_candidates)
     # Reuse integrity and leakage checks without overwriting the prior review report.
     verification = verify(dataset, write_report=False)
-    if read(base / 'config.json')['model_type'] != 'roberta':
-        raise ValueError('this experiment requires a local KLUE RoBERTa base')
+    if read(base / 'config.json')['model_type'] not in SUPPORTED_MODEL_TYPES:
+        raise ValueError('this experiment requires a local first-token RoBERTa/ELECTRA base')
     tokenizer = AutoTokenizer.from_pretrained(str(base), local_files_only=True)
     rows, encoded, maximum = {}, {}, {}
     for split in ('train', 'validation'):
         rows[split] = load_lines(dataset / f'relevance/{split}.jsonl')
-        encoded[split], lengths = encode_checked(tokenizer, [input_text(r['state'], 'relevance') for r in rows[split]])
+        encoded[split], lengths = encode_checked(tokenizer, [input_text(r['state'], 'relevance', schema=schema) for r in rows[split]])
         maximum[split] = max(lengths)
     protected = dict(manifest['protected_sources'])
     for name, info in manifest['files'].items():
@@ -107,7 +109,7 @@ def prepare(dataset=DATASET, base=BASE, *, allow_candidates=False):
     counts = Counter(r['score'] for r in rows['train'])
     majority = max(range(1, 4), key=lambda s: (counts[s], -s))
     config = {'purpose': 'Relevance-only development experiment; no urgency head or final-test selection',
-              'created_date': created_date(), 'input_schema': INPUT_SCHEMA, 'output_classes': {'relevance': 3},
+              'created_date': created_date(), 'input_schema': schema, 'output_classes': {'relevance': 3},
               'fresh_base_required': manifest.get('fresh_base_required', False),
               'dataset_dir': str(dataset), 'base_dir': str(base), 'candidate_labels_used': candidate,
               'label_status': 'mixed_assistant_and_user_candidates' if candidate else 'approved',
@@ -214,7 +216,7 @@ def train(run, rows, encoded, tokenizer, config, settings):
     torch.set_num_threads(4)
     device = settings['device']
     model = build_encoder(base=config['base_dir'], head_sizes=(3,), attention=settings['attention'],
-                          required_model_type='roberta').to(device)
+                          required_model_type=SUPPORTED_MODEL_TYPES).to(device)
     model.encoder.gradient_checkpointing_enable()
     optimizer = torch.optim.AdamW([{'params': model.encoder.parameters(), 'lr': settings['encoder_lr']},
                                   {'params': model.heads.parameters(), 'lr': settings['head_lr']}],
@@ -303,7 +305,7 @@ def load_run(run, *, device='cpu'):
         raise ValueError('checkpoint hash mismatch')
     tokenizer = AutoTokenizer.from_pretrained(str(run / 'tokenizer'), local_files_only=True)
     model = build_encoder(base=run / 'encoder', pretrained=False, head_sizes=(3,),
-                          attention=config['settings']['attention'], required_model_type='roberta')
+                          attention=config['settings']['attention'], required_model_type=SUPPORTED_MODEL_TYPES)
     model.load_state_dict(torch.load(run / 'model.pt', map_location='cpu', weights_only=True))
     model.to(device)
     return model, tokenizer, config
@@ -313,7 +315,7 @@ def evaluate_run(run, *, device='cpu', batch_size=8):
     model, tokenizer, config = load_run(run, device=device)
     assert_protected(config)
     rows = load_lines(Path(config['dataset_dir']) / 'relevance/validation.jsonl')
-    encoded, _ = encode_checked(tokenizer, [input_text(r['state'], 'relevance') for r in rows])
+    encoded, _ = encode_checked(tokenizer, [input_text(r['state'], 'relevance', schema=config.get('input_schema', INPUT_SCHEMA)) for r in rows])
     scores, _ = predictions(model, tokenizer, encoded, device=device, batch_size=batch_size)
     return evaluate(rows, scores)
 

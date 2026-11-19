@@ -8,6 +8,11 @@ import json
 INPUT_SCHEMA = 'notification-previous-windows-v3'
 WINDOWS_INPUT_SCHEMA = 'notification-windows-v2'
 LEGACY_INPUT_SCHEMA = 'notification-history-v1'
+# ALTONG_client develop ModelInputBuilder.Build: v3 windows plus recent_processes derived
+# from the same filtered recent windows, in the app's fixed key order.
+APP_INPUT_SCHEMA = 'notification-app-develop-v1'
+SCHEMAS = (INPUT_SCHEMA, WINDOWS_INPUT_SCHEMA, LEGACY_INPUT_SCHEMA, APP_INPUT_SCHEMA)
+NOTIFICATION_FIELDS = ('app_name', 'sender', 'title', 'body', 'timestamp')
 TASKS = ('urgency', 'relevance')
 RECENT_WINDOWS_POLICY = 'exclude-current-newest-first-max3'
 
@@ -33,8 +38,10 @@ def windows_only_state(state, *, schema=INPUT_SCHEMA):
 def input_text(state, task, *, schema=INPUT_SCHEMA):
     if task not in TASKS:
         raise ValueError('unknown task')
-    if schema not in (INPUT_SCHEMA, WINDOWS_INPUT_SCHEMA, LEGACY_INPUT_SCHEMA):
+    if schema not in SCHEMAS:
         raise ValueError('unknown encoder input schema')
+    if schema == APP_INPUT_SCHEMA:
+        return app_input_text(state, task)
     value = {'notification': {k: v for k, v in state['notification'].items() if k != 'id'}}
     if task == 'relevance':
         context = state['context']
@@ -46,6 +53,25 @@ def input_text(state, task, *, schema=INPUT_SCHEMA):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
+def app_input_text(state, task):
+    """Reproduce the app string exactly; C# maps null strings to empty strings."""
+    def text(value):
+        if value is None:
+            return ''
+        if not isinstance(value, str):
+            raise ValueError('app input fields must be strings')
+        return value
+    notification = state['notification']
+    value = {'notification': {k: text(notification.get(k)) for k in NOTIFICATION_FIELDS}}
+    if task == 'relevance':
+        context = state['context']
+        windows = previous_windows(context)
+        value['current_window'] = {k: text(context.get(k)) for k in ('active_process', 'window_title')}
+        value['recent_windows'] = [{k: text(w.get(k)) for k in ('app_name', 'window_title')} for w in windows]
+        value['recent_processes'] = [text(w.get('app_name')) for w in windows]
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+
 def legacy_input_text(state, task):
     """Only for unchanged models trained with the old serialized field."""
     return input_text(state, task, schema=LEGACY_INPUT_SCHEMA)
@@ -53,7 +79,7 @@ def legacy_input_text(state, task):
 
 def input_schema_for_run(config):
     schema = config.get('input_schema', LEGACY_INPUT_SCHEMA)
-    if schema not in (INPUT_SCHEMA, WINDOWS_INPUT_SCHEMA, LEGACY_INPUT_SCHEMA):
+    if schema not in SCHEMAS:
         raise ValueError('unknown run input schema')
     return schema
 
