@@ -8,7 +8,7 @@ AI Hub 검증 10건에서 추가 학습 모델은 평가기의 구조화 출력 
 
 ## 로컬 연동
 
-Gemma GGUF를 지원하는 llama-server에 모델을 로드하고 `127.0.0.1`에 바인딩한다. 검증은 CPU 스레드 6개, 문맥 4096 토큰, reasoning off 설정에서 진행했다. [클라이언트 PR #61](https://github.com/AIoish/ALTONG_client/pull/61)의 빌드를 실행할 때 앱 프로세스의 `ALTONG_GEMMA_PORT`에 해당 포트를 지정한다.
+통합 검증용 로컬 빌드에서 Gemma GGUF를 llama-server에 로드하고 `127.0.0.1`에 연결했다. 검증은 CPU 스레드 6개, 문맥 4096 토큰, reasoning off 설정에서 진행했다. 앱 배포 연동은 팀에서 별도로 결정한다. [클라이언트 PR #61](https://github.com/AIoish/ALTONG_client/pull/61)은 일정 카드 수정과 회귀 테스트를 다룬다.
 
 클라이언트가 시스템 및 사용자 메시지와 JSON 스키마를 보내면 서버가 GGUF의 Gemma 채팅 템플릿을 적용한다. 응답 객체는 `primary_category`와 `summary_lines` 두 키를 사용한다. 클라이언트는 허용 카테고리 하나와 요약 1~3줄, 줄당 160자 이하를 검사한다.
 
